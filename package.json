@@ -1,7 +1,7 @@
 {
   "name": "orbittest",
   "version": "1.1.1",
-  "description": "Playwright-style browser automation test runner built on Chrome DevTools Protocol.",
+  "description": "Browser automation test runner built on Chrome DevTools Protocol.",
   "main": "orbit.js",
   "exports": {
     ".": "./orbit.js"
