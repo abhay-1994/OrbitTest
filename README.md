@@ -58,7 +58,64 @@ await orbit.open("https://example.com/");
 await orbit.click("Login");
 await orbit.type("Email", "user@example.com");
 await orbit.hasText("Welcome");
+await orbit.waitForText("Ready");
+await orbit.waitFor(orbit.css(".loaded"));
+await orbit.wait(500);
 await orbit.screenshot("reports/screenshot.png");
+```
+
+## Locators
+
+Text still works:
+
+```js
+await orbit.click("Login");
+await orbit.type("Email", "user@example.com");
+```
+
+You can also use CSS selectors, XPath, roles, and attributes:
+
+```js
+await orbit.click(orbit.css("#login"));
+await orbit.click(orbit.xpath("//button[text()='Login']"));
+await orbit.click(orbit.getByRole("button", "Login"));
+await orbit.type(orbit.getByAttribute("name", "email"), "user@example.com");
+
+expect(await orbit.exists(orbit.css(".success"))).toBe(true);
+expect(await orbit.text(orbit.getByRole("heading", "Welcome"))).toContain("Welcome");
+```
+
+## Waiting
+
+Wait for text:
+
+```js
+await orbit.waitForText("Dashboard");
+await orbit.waitForText("Dashboard", { timeout: 10000, interval: 200 });
+```
+
+Wait for any locator:
+
+```js
+await orbit.waitFor(orbit.css(".toast"));
+await orbit.waitFor(orbit.xpath("//button[text()='Continue']"), 5000);
+await orbit.waitFor(orbit.getByRole("button", "Save"));
+await orbit.waitFor(orbit.getByAttribute("data-testid", "ready"));
+```
+
+Wait for a fixed time:
+
+```js
+await orbit.wait(500);
+```
+
+Locator objects are supported too:
+
+```js
+await orbit.click({ css: "#login" });
+await orbit.click({ xpath: "//button" });
+await orbit.click({ role: "button", name: "Login" });
+await orbit.click({ attribute: "data-testid", value: "submit" });
 ```
 
 ## CLI

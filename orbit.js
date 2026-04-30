@@ -21,23 +21,58 @@ class Orbit {
     await this.browser.waitForLoad();
   }
 
-  async click(text) {
-    await this.browser.page.click(text);
+  async click(locator) {
+    await this.browser.page.click(locator);
   }
 
-  async type(text, value) {
-    await this.browser.page.type(text, value);
+  async type(locator, value) {
+    await this.browser.page.type(locator, value);
   }
 
   async hasText(text) {
     return this.browser.page.hasText(text);
   }
 
+  async waitForText(text, options) {
+    return this.browser.page.waitForText(text, options);
+  }
+
+  async exists(locator) {
+    return this.browser.page.exists(locator);
+  }
+
+  async waitFor(locator, options) {
+    return this.browser.page.waitFor(locator, options);
+  }
+
+  async text(locator) {
+    return this.browser.page.text(locator);
+  }
+
+  async wait(ms) {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async screenshot(filePath) {
     return this.browser.screenshot(filePath);
   }
 
-  // 🔥 NEW
+  css(selector) {
+    return { css: selector };
+  }
+
+  xpath(selector) {
+    return { xpath: selector };
+  }
+
+  getByRole(role, name) {
+    return { role, name };
+  }
+
+  getByAttribute(name, value) {
+    return { attribute: name, value };
+  }
+
   async close() {
     if (this.browser) {
       this.browser.close();

@@ -4,6 +4,9 @@ All notable changes to OrbitTest will be documented in this file.
 
 ## 1.1.2
 
+- Added CSS, XPath, role, and attribute locators.
+- Added `exists()` and `text()` page helpers.
+- Added `wait()`, `waitFor()`, and `waitForText()` helpers.
 
 
 ## 1.1.1
