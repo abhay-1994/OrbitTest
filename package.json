@@ -2,26 +2,24 @@
   "name": "orbittest",
   "version": "1.1.2",
   "description": "Browser automation test runner built on Chrome DevTools Protocol.",
-  "main": "orbit.js",
+  "main": "dist/orbit.js",
   "exports": {
-    ".": "./orbit.js"
+    ".": "./dist/orbit.js"
   },
   "bin": {
-    "orbittest": "cli.js"
+    "orbittest": "dist/cli.js"
   },
   "files": [
-    "core",
-    "page",
-    "runner",
-    "cli.js",
-    "orbit.js",
+    "dist",
     "README.md",
     "LICENSE",
     "NOTICE",
     "CHANGELOG.md"
   ],
   "scripts": {
+    "build": "esbuild cli.js orbit.js --bundle --platform=node --format=cjs --packages=external --outdir=dist",
     "test": "node cli.js run",
+    "prepack": "npm run build",
     "prepublishOnly": "npm test"
   },
   "keywords": [
@@ -41,5 +39,8 @@
   "dependencies": {
     "puppeteer": "^24.42.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }
