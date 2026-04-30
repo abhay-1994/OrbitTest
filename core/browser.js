@@ -15,67 +15,77 @@ class Browser {
     await this.connection.send("Page.enable");
     await this.connection.send("DOM.enable");
     await this.connection.send("Runtime.enable");
+    await this.connection.send("Page.setLifecycleEventsEnabled", {
+      enabled: true
+    });
 
     this.page = new Page(this.connection);
 
     console.log("Browser ready");
   }
 
-  async waitForLoad(timeoutMs = 10000) {
+  async waitForLoad(timeoutMs = 15000) {
     console.log("Waiting for page load...");
 
     const startedAt = Date.now();
+    let lastState = "unknown";
+    let stableCompleteCount = 0;
 
-    return new Promise((resolve, reject) => {
-      const check = async () => {
-        try {
-          const response = await this.connection.send("Runtime.evaluate", {
-            expression: "document.readyState",
-            returnByValue: true
-          });
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const response = await this.connection.send("Runtime.evaluate", {
+          expression: "document.readyState",
+          returnByValue: true
+        }, {
+          timeoutMs: 3000
+        });
 
-          const state = response.result?.result?.value;
+        lastState = response.result?.result?.value || "unknown";
 
-          if (state === "complete") {
+        if (lastState === "complete") {
+          stableCompleteCount++;
+
+          if (stableCompleteCount >= 2) {
             console.log("Page loaded");
-            resolve();
             return;
           }
-
-          if (Date.now() - startedAt >= timeoutMs) {
-            reject(new Error(`Page did not finish loading. Last readyState: ${state}`));
-            return;
-          }
-
-          setTimeout(check, 200);
-        } catch (error) {
-          reject(error);
+        } else {
+          stableCompleteCount = 0;
         }
-      };
+      } catch (error) {
+        stableCompleteCount = 0;
+        lastState = error.message || String(error);
+      }
 
-      check();
-    });
+      await delay(150);
+    }
+
+    throw new Error(`Page did not finish loading after ${timeoutMs}ms. Last state: ${lastState}`);
   }
 
-  async goto(url) {
+  async goto(url, options = {}) {
+    const timeoutMs = options.timeout || options.timeoutMs || 15000;
+
     console.log("Navigating to:", url);
 
-    for (let i = 0; i < 3; i++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const response = await this.connection.send("Page.navigate", { url });
+        const response = await this.connection.send("Page.navigate", { url }, { timeoutMs });
+        const result = response.result || {};
 
-        if (response.error) {
-          throw new Error(response.error.message);
+        if (result.errorText) {
+          throw new Error(result.errorText);
         }
 
+        await this.waitForLoad(timeoutMs);
         return;
       } catch (error) {
-        if (i === 2) {
-          throw new Error(`Navigation failed: ${error.message || error}`);
+        if (attempt === 3 || !isRetryableNavigationError(error)) {
+          throw new Error(`Navigation failed for ${url}: ${error.message || error}`);
         }
 
-        console.log("Retrying navigation...");
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log(`Retrying navigation (${attempt + 1}/3)...`);
+        await delay(500 * attempt);
       }
     }
   }
@@ -100,6 +110,21 @@ class Browser {
   close() {
     this.connection.close();
   }
+}
+
+function isRetryableNavigationError(error) {
+  const message = String(error.message || error).toLowerCase();
+
+  return message.includes("timeout") ||
+    message.includes("context") ||
+    message.includes("closed") ||
+    message.includes("detached") ||
+    message.includes("navigation") ||
+    message.includes("net::err_aborted");
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 module.exports = Browser;

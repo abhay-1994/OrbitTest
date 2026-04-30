@@ -18,10 +18,22 @@ class Page {
     return htmlResponse.result.outerHTML;
   }
 
-  async click(target) {
+  async click(target, options = {}) {
     console.log("Finding:", describeLocator(target));
 
-    const { x, y } = await this.findClickablePoint(target);
+    let point = null;
+    const waitOptions = normalizeWaitOptions(options);
+
+    await waitUntil(
+      async () => {
+        point = await this.findClickablePoint(target);
+        return Boolean(point);
+      },
+      waitOptions,
+      `Timed out after ${waitOptions.timeout}ms waiting to click ${describeLocator(target)}`
+    );
+
+    const { x, y } = point;
 
     console.log("Clicking at:", x, y);
 
@@ -48,8 +60,18 @@ class Page {
     });
   }
 
-  async type(target, value) {
-    const found = await this.focusInput(target);
+  async type(target, value, options = {}) {
+    let found = false;
+    const waitOptions = normalizeWaitOptions(options);
+
+    await waitUntil(
+      async () => {
+        found = await this.focusInput(target);
+        return found;
+      },
+      waitOptions,
+      `Timed out after ${waitOptions.timeout}ms waiting to type into ${describeLocator(target)}`
+    );
 
     if (!found) {
       throw new Error(`No input found for ${describeLocator(target)}`);
@@ -198,19 +220,22 @@ function buildLocatorExpression(target, action) {
 
       return style.display !== 'none' &&
         style.visibility !== 'hidden' &&
+        style.opacity !== '0' &&
         rect.width > 0 &&
         rect.height > 0;
     }
 
     function isClickable(el) {
       if (!el || !(el instanceof Element)) return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
 
       const tag = el.tagName.toLowerCase();
+      const style = window.getComputedStyle(el);
 
       return ['button', 'a', 'input', 'select', 'textarea'].includes(tag) ||
         Boolean(el.onclick) ||
         el.getAttribute('role') === 'button' ||
-        window.getComputedStyle(el).cursor === 'pointer';
+        style.cursor === 'pointer';
     }
 
     function textFor(el) {
@@ -364,6 +389,48 @@ function buildLocatorExpression(target, action) {
       return elements.find(isVisible) || null;
     }
 
+    function isTopElementAtPoint(el, x, y) {
+      const topElements = document.elementsFromPoint(x, y);
+
+      return topElements.some(top => top === el || el.contains(top) || top.contains(el));
+    }
+
+    function clickablePointFor(el) {
+      if (!isVisible(el)) return null;
+
+      const style = window.getComputedStyle(el);
+      if (style.pointerEvents === 'none') return null;
+
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+
+      const rect = el.getBoundingClientRect();
+      const left = Math.max(0, rect.left);
+      const top = Math.max(0, rect.top);
+      const right = Math.min(window.innerWidth, rect.right);
+      const bottom = Math.min(window.innerHeight, rect.bottom);
+
+      if (right <= left || bottom <= top) return null;
+
+      const points = [
+        [left + (right - left) / 2, top + (bottom - top) / 2],
+        [left + Math.min(8, (right - left) / 2), top + Math.min(8, (bottom - top) / 2)],
+        [right - Math.min(8, (right - left) / 2), top + Math.min(8, (bottom - top) / 2)],
+        [left + Math.min(8, (right - left) / 2), bottom - Math.min(8, (bottom - top) / 2)],
+        [right - Math.min(8, (right - left) / 2), bottom - Math.min(8, (bottom - top) / 2)]
+      ];
+
+      for (const point of points) {
+        const x = point[0];
+        const y = point[1];
+
+        if (isTopElementAtPoint(el, x, y)) {
+          return { x, y };
+        }
+      }
+
+      return null;
+    }
+
     const elements = findElements();
 
     if (action === 'exists') {
@@ -414,28 +481,18 @@ function buildLocatorExpression(target, action) {
 
         while (current) {
           if (isClickable(current) && isVisible(current)) {
-            current.scrollIntoView({ block: 'center', inline: 'center' });
+            const point = clickablePointFor(current);
 
-            const rect = current.getBoundingClientRect();
-
-            return {
-              x: rect.left + rect.width / 2,
-              y: rect.top + rect.height / 2
-            };
+            if (point) return point;
           }
 
           current = current.parentElement;
         }
 
         if (locator.type !== 'text' && isVisible(el)) {
-          el.scrollIntoView({ block: 'center', inline: 'center' });
+          const point = clickablePointFor(el);
 
-          const rect = el.getBoundingClientRect();
-
-          return {
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2
-          };
+          if (point) return point;
         }
       }
 

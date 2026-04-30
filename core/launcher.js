@@ -20,6 +20,7 @@ async function launchChrome() {
     "--disable-background-networking",
     "--disable-default-apps",
     "--disable-extensions",
+    "--disable-dev-shm-usage",
     "--disable-popup-blocking",
     "about:blank"
   ], {
@@ -29,7 +30,7 @@ async function launchChrome() {
 
   chromeProcess.unref();
 
-  const port = await waitForDevToolsPort(userDataDir);
+  const port = await waitForDevToolsPort(userDataDir, 15000);
 
   console.log("Fresh Chrome instance launched");
 
@@ -113,6 +114,10 @@ async function waitForDevToolsPort(profileDir, timeoutMs = 10000) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
+    if (chromeProcess && chromeProcess.exitCode !== null) {
+      throw new Error(`Chrome exited before DevTools was ready. Exit code: ${chromeProcess.exitCode}`);
+    }
+
     if (fs.existsSync(activePortFile)) {
       const [port] = fs.readFileSync(activePortFile, "utf8").split(/\r?\n/);
 

@@ -4,9 +4,12 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
-const packageApiPath = path.join(__dirname, "orbit.js");
+const packageApiPath = path.basename(__dirname) === "dist"
+  ? __filename
+  : path.join(__dirname, "orbit.js");
 const packageJson = require("./package.json");
 const resolveFilename = Module._resolveFilename;
+const packageApi = require("./orbit");
 
 Module._resolveFilename = function resolveOrbitTest(request, parent, isMain, options) {
   if (request === "orbittest") {
@@ -16,10 +19,14 @@ Module._resolveFilename = function resolveOrbitTest(request, parent, isMain, opt
   return resolveFilename.call(this, request, parent, isMain, options);
 };
 
-main().catch(error => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+module.exports = packageApi;
+
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}
 
 async function main() {
   const args = process.argv.slice(2);

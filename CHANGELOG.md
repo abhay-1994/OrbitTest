@@ -7,6 +7,8 @@ All notable changes to OrbitTest will be documented in this file.
 - Added CSS, XPath, role, and attribute locators.
 - Added `exists()` and `text()` page helpers.
 - Added `wait()`, `waitFor()`, and `waitForText()` helpers.
+- Hardened WebSocket close handling, command timeouts, navigation waits, and click point selection.
+- Fixed bundled CLI test registration for the npm `dist` package.
 
 
 ## 1.1.1

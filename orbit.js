@@ -16,17 +16,16 @@ class Orbit {
     await this.browser.start();
   }
 
-  async open(url) {
-    await this.browser.goto(url);
-    await this.browser.waitForLoad();
+  async open(url, options) {
+    await this.browser.goto(url, options);
   }
 
-  async click(locator) {
-    await this.browser.page.click(locator);
+  async click(locator, options) {
+    await this.browser.page.click(locator, options);
   }
 
-  async type(locator, value) {
-    await this.browser.page.type(locator, value);
+  async type(locator, value, options) {
+    await this.browser.page.type(locator, value, options);
   }
 
   async hasText(text) {
