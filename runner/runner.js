@@ -2,13 +2,31 @@ const fs = require('fs');
 const path = require('path');
 
 const tests = [];
+const beforeEachHooks = [];
+const afterEachHooks = [];
 
-function test(name, fn) {
+function test(name, options, fn) {
+  const testFn = typeof options === 'function' ? options : fn;
+  const testOptions = typeof options === 'function' ? {} : options || {};
+
+  if (typeof testFn !== 'function') {
+    throw new Error(`Test "${name}" must include a function.`);
+  }
+
   tests.push({
     name,
-    fn,
+    fn: testFn,
+    options: testOptions,
     file: process.env.ORBITTEST_LOADING_FILE || null
   });
+}
+
+function beforeEach(fn) {
+  registerHook(beforeEachHooks, 'beforeEach', fn);
+}
+
+function afterEach(fn) {
+  registerHook(afterEachHooks, 'afterEach', fn);
 }
 
 function expect(actual) {
@@ -49,62 +67,11 @@ async function runRegisteredTests(options = {}) {
   const runId = createRunId(startedAt);
   const reportsDir = options.reportsDir || path.join(process.cwd(), 'reports');
   const artifactsDir = path.join(reportsDir, 'artifacts', runId);
-  const results = [];
-
-  for (const [index, t] of tests.entries()) {
-    console.log(`\nRunning: ${t.name}`);
-
-    const Orbit = require('../orbit');
-    const orbit = new Orbit();
-    const testStartedAt = new Date();
-
-    const result = {
-      name: t.name,
-      file: t.file,
-      status: 'passed',
-      startedAt: testStartedAt.toISOString(),
-      endedAt: null,
-      durationMs: 0,
-      error: null,
-      artifacts: {}
-    };
-
-    try {
-      await orbit.launch();
-      await t.fn(orbit);
-      console.log(`Passed: ${t.name}`);
-    } catch (error) {
-      result.status = 'failed';
-      result.error = serializeError(error);
-
-      await attachFailureScreenshot({ orbit, result, artifactsDir, index });
-
-      console.log(`Failed: ${t.name}`);
-      console.error(`Reason: ${result.error.message}`);
-    } finally {
-      try {
-        await orbit.close();
-      } catch (error) {
-        const closeError = serializeError(error);
-
-        if (result.status === 'passed') {
-          result.status = 'failed';
-          result.error = {
-            name: closeError.name,
-            message: `Browser cleanup failed: ${closeError.message}`,
-            stack: closeError.stack
-          };
-        } else if (result.error) {
-          result.error.message += `; Browser cleanup failed: ${closeError.message}`;
-        }
-      }
-
-      const testEndedAt = new Date();
-      result.endedAt = testEndedAt.toISOString();
-      result.durationMs = testEndedAt.getTime() - testStartedAt.getTime();
-      results.push(result);
-    }
-  }
+  const workers = normalizeWorkers(options.workers || options.parallel, options.maxWorkers);
+  const runOptions = normalizeRunOptions(options, workers);
+  const results = workers > 1
+    ? await runTestsInParallel({ artifactsDir, runOptions })
+    : await runTestsInSeries({ artifactsDir, runOptions });
 
   const endedAt = new Date();
   const report = buildReport({
@@ -112,7 +79,10 @@ async function runRegisteredTests(options = {}) {
     endedAt,
     results,
     runId,
-    testFiles: options.testFiles || unique(tests.map(t => t.file).filter(Boolean))
+    testFiles: options.testFiles || unique(tests.map(t => t.file).filter(Boolean)),
+    workers,
+    retries: runOptions.retries,
+    testTimeout: runOptions.testTimeout
   });
 
   const reportPaths = writeReports(report, reportsDir);
@@ -125,8 +95,184 @@ async function runRegisteredTests(options = {}) {
   return report;
 }
 
+async function runTestsInSeries({ artifactsDir, runOptions }) {
+  const results = [];
+
+  for (const [index, t] of tests.entries()) {
+    results[index] = await runOneTest(t, index, artifactsDir, runOptions);
+  }
+
+  return results;
+}
+
+async function runTestsInParallel({ artifactsDir, runOptions }) {
+  const results = new Array(tests.length);
+  let nextIndex = 0;
+
+  console.log(`\nRunning ${tests.length} tests with ${runOptions.workers} workers`);
+
+  async function worker() {
+    while (nextIndex < tests.length) {
+      const index = nextIndex;
+      nextIndex++;
+      results[index] = await runOneTest(tests[index], index, artifactsDir, runOptions);
+    }
+  }
+
+  const workerCount = Math.min(runOptions.workers, tests.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return results;
+}
+
+async function runOneTest(t, index, artifactsDir, runOptions) {
+  console.log(`\nRunning: ${t.name}`);
+
+  const testStartedAt = new Date();
+  const retries = normalizeInteger(t.options.retries ?? runOptions.retries, 0);
+  const testTimeout = normalizeInteger(t.options.timeout ?? t.options.testTimeout ?? runOptions.testTimeout, runOptions.testTimeout);
+
+  const result = {
+    name: t.name,
+    file: t.file,
+    status: 'passed',
+    startedAt: testStartedAt.toISOString(),
+    endedAt: null,
+    durationMs: 0,
+    attempts: 0,
+    error: null,
+    artifacts: {}
+  };
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    result.attempts = attempt + 1;
+
+    const Orbit = require('../orbit');
+    const orbit = new Orbit({
+      actionTimeout: runOptions.actionTimeout
+    });
+
+    try {
+      await orbit.launch();
+      await runHooks(beforeEachHooks, orbit, t, testTimeout);
+
+      let testError = null;
+
+      try {
+        await withTimeout(t.fn(orbit), testTimeout, `Test timed out after ${testTimeout}ms`);
+      } catch (error) {
+        testError = error;
+      }
+
+      try {
+        await runHooks(afterEachHooks, orbit, t, testTimeout);
+      } catch (error) {
+        testError = testError || error;
+      }
+
+      if (testError) {
+        throw testError;
+      }
+
+      result.status = 'passed';
+      result.error = null;
+      console.log(`Passed: ${t.name}`);
+      await closeOrbit(orbit, result);
+      break;
+    } catch (error) {
+      result.status = 'failed';
+      result.error = serializeError(error);
+
+      if (attempt >= retries) {
+        await attachFailureScreenshot({ orbit, result, artifactsDir, index });
+        console.log(`Failed: ${t.name}`);
+        console.error(`Reason: ${result.error.message}`);
+      } else {
+        console.log(`Retrying: ${t.name} (${attempt + 1}/${retries})`);
+        console.error(`Reason: ${result.error.message}`);
+      }
+
+      await closeOrbit(orbit, result);
+    }
+  }
+
+  const testEndedAt = new Date();
+  result.endedAt = testEndedAt.toISOString();
+  result.durationMs = testEndedAt.getTime() - testStartedAt.getTime();
+
+  return result;
+}
+
+async function runHooks(hooks, orbit, testInfo, timeoutMs) {
+  for (const hook of hooks) {
+    await withTimeout(hook(orbit, testInfo), timeoutMs, `Hook timed out after ${timeoutMs}ms`);
+  }
+}
+
+async function closeOrbit(orbit, result) {
+  try {
+    await orbit.close();
+  } catch (error) {
+    const closeError = serializeError(error);
+
+    if (result.status === 'passed') {
+      result.status = 'failed';
+      result.error = {
+        name: closeError.name,
+        message: `Browser cleanup failed: ${closeError.message}`,
+        stack: closeError.stack
+      };
+    } else if (result.error) {
+      result.error.message += `; Browser cleanup failed: ${closeError.message}`;
+    }
+  }
+}
+
+function normalizeRunOptions(options, workers) {
+  return {
+    workers,
+    retries: normalizeInteger(options.retries, 0),
+    testTimeout: normalizeInteger(options.testTimeout || options.timeout, 30000),
+    actionTimeout: normalizeInteger(options.actionTimeout, 0)
+  };
+}
+
+function normalizeWorkers(value, maxWorkers) {
+  if (value === true) {
+    return Math.max(1, Math.min(osWorkerCount(), normalizeInteger(maxWorkers, 4)));
+  }
+
+  const workers = Number(value || 1);
+
+  if (!Number.isFinite(workers) || workers < 1) {
+    return 1;
+  }
+
+  return Math.min(Math.floor(workers), normalizeInteger(maxWorkers, 4));
+}
+
+function normalizeInteger(value, fallback) {
+  const number = Number(value ?? fallback);
+
+  if (!Number.isFinite(number) || number < 0) {
+    return fallback;
+  }
+
+  return Math.floor(number);
+}
+
+function osWorkerCount() {
+  try {
+    return Math.max(1, require('os').cpus().length);
+  } catch (error) {
+    return 1;
+  }
+}
+
 function resetTests() {
   tests.length = 0;
+  beforeEachHooks.length = 0;
+  afterEachHooks.length = 0;
 }
 
 function getTests() {
@@ -152,7 +298,7 @@ async function attachFailureScreenshot({ orbit, result, artifactsDir, index }) {
   }
 }
 
-function buildReport({ startedAt, endedAt, results, runId, testFiles }) {
+function buildReport({ startedAt, endedAt, results, runId, testFiles, workers, retries, testTimeout }) {
   const passed = results.filter(result => result.status === 'passed').length;
   const failed = results.filter(result => result.status === 'failed').length;
   const total = results.length;
@@ -165,6 +311,9 @@ function buildReport({ startedAt, endedAt, results, runId, testFiles }) {
       platform: process.platform,
       runId,
       testFiles,
+      workers,
+      retries,
+      testTimeout,
       startedAt: startedAt.toISOString(),
       endedAt: endedAt.toISOString(),
       durationMs: endedAt.getTime() - startedAt.getTime()
@@ -497,6 +646,26 @@ function unique(values) {
   return Array.from(new Set(values));
 }
 
+function registerHook(hooks, name, fn) {
+  if (typeof fn !== 'function') {
+    throw new Error(`${name} must be a function.`);
+  }
+
+  hooks.push(fn);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeout = null;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeout);
+  });
+}
+
 function toHref(filePath) {
   return filePath.replace(/\\/g, '/');
 }
@@ -512,6 +681,8 @@ function escapeHtml(value) {
 
 module.exports = {
   test,
+  beforeEach,
+  afterEach,
   expect,
   run,
   runRegisteredTests,

@@ -1,210 +1,3 @@
-class Page {
-  constructor(connection) {
-    this.connection = connection;
-  }
-
-  async getHTML() {
-    const response = await this.connection.send("DOM.getDocument");
-
-    if (!response.result) {
-      throw new Error("DOM is not ready");
-    }
-
-    const rootNodeId = response.result.root.nodeId;
-    const htmlResponse = await this.connection.send("DOM.getOuterHTML", {
-      nodeId: rootNodeId
-    });
-
-    return htmlResponse.result.outerHTML;
-  }
-
-  async click(target, options = {}) {
-    console.log("Finding:", describeLocator(target));
-
-    let point = null;
-    const waitOptions = normalizeWaitOptions(options);
-
-    await waitUntil(
-      async () => {
-        point = await this.findClickablePoint(target);
-        return Boolean(point);
-      },
-      waitOptions,
-      `Timed out after ${waitOptions.timeout}ms waiting to click ${describeLocator(target)}`
-    );
-
-    const { x, y } = point;
-
-    console.log("Clicking at:", x, y);
-
-    await this.connection.send("Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x,
-      y
-    });
-
-    await this.connection.send("Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      x,
-      y,
-      button: "left",
-      clickCount: 1
-    });
-
-    await this.connection.send("Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      x,
-      y,
-      button: "left",
-      clickCount: 1
-    });
-  }
-
-  async type(target, value, options = {}) {
-    let found = false;
-    const waitOptions = normalizeWaitOptions(options);
-
-    await waitUntil(
-      async () => {
-        found = await this.focusInput(target);
-        return found;
-      },
-      waitOptions,
-      `Timed out after ${waitOptions.timeout}ms waiting to type into ${describeLocator(target)}`
-    );
-
-    if (!found) {
-      throw new Error(`No input found for ${describeLocator(target)}`);
-    }
-
-    await this.connection.send("Input.insertText", {
-      text: String(value)
-    });
-  }
-
-  async hasText(text) {
-    const response = await this.connection.send("Runtime.evaluate", {
-      expression: `document.body && document.body.innerText.toLowerCase().includes(${JSON.stringify(String(text).toLowerCase())})`,
-      returnByValue: true
-    });
-
-    return Boolean(response.result?.result?.value);
-  }
-
-  async waitForText(text, options = {}) {
-    const waitOptions = normalizeWaitOptions(options);
-
-    await waitUntil(
-      () => this.hasText(text),
-      waitOptions,
-      `Timed out after ${waitOptions.timeout}ms waiting for text "${text}"`
-    );
-
-    return true;
-  }
-
-  async exists(target) {
-    const response = await this.connection.send("Runtime.evaluate", {
-      expression: buildLocatorExpression(target, "exists"),
-      returnByValue: true
-    });
-
-    return Boolean(response.result?.result?.value);
-  }
-
-  async waitFor(target, options = {}) {
-    const waitOptions = normalizeWaitOptions(options);
-
-    await waitUntil(
-      () => this.exists(target),
-      waitOptions,
-      `Timed out after ${waitOptions.timeout}ms waiting for ${describeLocator(target)}`
-    );
-
-    return true;
-  }
-
-  async text(target) {
-    const response = await this.connection.send("Runtime.evaluate", {
-      expression: buildLocatorExpression(target, "text"),
-      returnByValue: true
-    });
-
-    const value = response.result?.result?.value;
-
-    if (value === null || value === undefined) {
-      throw new Error(`No element found for ${describeLocator(target)}`);
-    }
-
-    return value;
-  }
-
-  async findClickablePoint(target) {
-    const response = await this.connection.send("Runtime.evaluate", {
-      expression: buildLocatorExpression(target, "clickPoint"),
-      returnByValue: true
-    });
-
-    const value = response.result?.result?.value;
-
-    if (!value) {
-      throw new Error(`No clickable element found for ${describeLocator(target)}`);
-    }
-
-    return value;
-  }
-
-  async focusInput(target) {
-    const response = await this.connection.send("Runtime.evaluate", {
-      expression: buildLocatorExpression(target, "focusInput"),
-      returnByValue: true
-    });
-
-    return Boolean(response.result?.result?.value);
-  }
-}
-
-async function waitUntil(check, options, timeoutMessage) {
-  const startedAt = Date.now();
-  let lastError = null;
-
-  while (Date.now() - startedAt <= options.timeout) {
-    try {
-      if (await check()) {
-        return;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-
-    await delay(options.interval);
-  }
-
-  if (lastError) {
-    throw new Error(`${timeoutMessage}. Last error: ${lastError.message || lastError}`);
-  }
-
-  throw new Error(timeoutMessage);
-}
-
-function normalizeWaitOptions(options = {}) {
-  if (typeof options === "number") {
-    return {
-      timeout: options,
-      interval: 100
-    };
-  }
-
-  return {
-    timeout: Number(options.timeout || options.timeoutMs || 5000),
-    interval: Number(options.interval || options.intervalMs || 100)
-  };
-}
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function buildLocatorExpression(target, action) {
   const locator = normalizeLocator(target);
 
@@ -499,6 +292,22 @@ function buildLocatorExpression(target, action) {
       return null;
     }
 
+    if (action === 'point') {
+      const orderedElements = locator.type === 'text'
+        ? elements.slice().reverse()
+        : elements;
+
+      for (const el of orderedElements) {
+        if (!isVisible(el)) continue;
+
+        const point = clickablePointFor(el);
+
+        if (point) return point;
+      }
+
+      return null;
+    }
+
     return null;
   })()`;
 }
@@ -574,4 +383,8 @@ function describeLocator(target) {
   return `"${locator.text}"`;
 }
 
-module.exports = Page;
+module.exports = {
+  buildLocatorExpression,
+  describeLocator,
+  normalizeLocator
+};

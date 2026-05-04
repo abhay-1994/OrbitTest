@@ -12,7 +12,7 @@ OrbitTest is a lightweight end-to-end testing tool that lets you write tests usi
 # ⚡ Quick Example
 
 ```js
-const { test, expect, run } = require("orbittest");
+const { test, expect } = require("orbittest");
 
 test("Login flow", async (orbit) => {
   await orbit.open("https://example.com");
@@ -21,8 +21,6 @@ test("Login flow", async (orbit) => {
 
   expect(await orbit.hasText("Dashboard")).toBe(true);
 });
-
-run();
 ```
 
 👉 No CSS
@@ -58,14 +56,16 @@ await orbit.click("Login");
 
 # 📦 Installation
 
+
 ```bash
-npm install -D orbittest
+npm install 
+npm install -g orbittest
 ```
 
 Check installation:
 
 ```bash
-npx orbittest --version
+orbittest --version
 ```
 
 ---
@@ -75,12 +75,13 @@ npx orbittest --version
 ## Initialize project
 
 ```bash
-npx orbittest init
+orbittest init
 ```
 
 This creates:
 
 ```
+orbittest.config.js
 tests/
   example.test.js
 reports/
@@ -91,7 +92,7 @@ reports/
 ## Run tests
 
 ```bash
-npx orbittest run
+orbittest run
 ```
 
 Or:
@@ -105,20 +106,64 @@ npm run test:e2e
 # 🧪 Writing Tests
 
 ```js
-const { test, expect, run } = require("orbittest");
+const { test, expect } = require("orbittest");
 
 test("Home page loads", async (orbit) => {
   await orbit.open("https://example.com");
 
   expect(await orbit.hasText("Example Domain")).toBe(true);
 });
+```
 
-run();
+Hooks and per-test options are supported:
+
+```js
+const { beforeEach, afterEach, test } = require("orbittest");
+
+beforeEach(async (orbit, testInfo) => {
+  console.log(`Starting ${testInfo.name}`);
+});
+
+afterEach(async (orbit, testInfo) => {
+  console.log(`Finished ${testInfo.name}`);
+});
+
+test("retry a slow flow", { retries: 1, timeout: 30000 }, async (orbit) => {
+  await orbit.open("https://example.com");
+});
 ```
 
 ---
 
 # 🌐 Browser Actions
+
+# Configuration
+
+OrbitTest reads `orbittest.config.js` from your project root:
+
+```js
+module.exports = {
+  testDir: "tests",
+  testMatch: ["**/*.test.js", "**/*.spec.js"],
+  reportsDir: "reports",
+  workers: 1,
+  maxWorkers: 4,
+  retries: 0,
+  testTimeout: 30000,
+  actionTimeout: 0,
+  environments: {
+    staging: {
+      reportsDir: "reports/staging"
+    }
+  }
+};
+```
+
+CLI flags override config values, for example `orbittest run --workers 2 --retries 1 --timeout 30000 --env staging`.
+
+Test files are run by the CLI, so you do not need `run()` in each test file.
+
+---
 
 ## Open a page
 
@@ -132,6 +177,16 @@ await orbit.open("https://example.com");
 
 ```js
 await orbit.click("Login");
+```
+
+---
+
+## Mouse actions
+
+```js
+await orbit.hover("Menu");
+await orbit.doubleClick("Open");
+await orbit.rightClick("File");
 ```
 
 ---
@@ -369,19 +424,33 @@ tests/**/*.spec.js
 Run all tests:
 
 ```bash
-npx orbittest run
+orbittest run
 ```
 
 Run specific file:
 
 ```bash
-npx orbittest run tests/login.test.js
+orbittest run tests/login.test.js
 ```
 
 Run folder:
 
 ```bash
-npx orbittest run tests
+orbittest run tests
+```
+
+Run in parallel:
+
+```bash
+orbittest run --workers 4
+```
+
+Or set workers in `orbittest.config.js`.
+
+Override config from the CLI:
+
+```bash
+orbittest run --retries 2 --timeout 30000 --reports-dir reports/debug
 ```
 
 ---
@@ -399,14 +468,13 @@ npx orbittest run tests
 
 ```bash
 set ORBITTEST_CHROME_PATH=C:\Path\To\chrome.exe
-npx orbittest run
+orbittest run
 ```
 
 ---
 
 # 🚧 Current Limitations
 
-* No parallel execution
 * Limited smart matching
 * Basic wait system
 
@@ -417,7 +485,6 @@ npx orbittest run
 * Smart element detection
 * Improved wait system
 * Headless mode
-* Parallel execution
 * CI integrations
 
 ---

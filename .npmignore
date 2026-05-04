@@ -3,8 +3,4 @@ docs/
 tests/
 reports/
 node_modules/
-core/
-page/
-runner/
-cli.js
-orbit.js
+dist/

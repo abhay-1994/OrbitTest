@@ -14,16 +14,16 @@ OrbitTest uses Puppeteer's managed Chrome by default. During install, Puppeteer 
 
 ## Install OrbitTest
 
-Install OrbitTest as a development dependency:
+Install OrbitTest globally:
 
 ```bash
-npm install -D orbittest
+npm install -g orbittest
 ```
 
 Check that the CLI is available:
 
 ```bash
-npx orbittest --version
+orbittest --version
 ```
 
 ## Create a Test Project
@@ -31,12 +31,13 @@ npx orbittest --version
 Run the init command:
 
 ```bash
-npx orbittest init
+orbittest init
 ```
 
 This creates a starter test folder and adds a test script when possible:
 
 ```txt
+orbittest.config.js
 tests/
   example.test.js
 reports/
@@ -57,7 +58,7 @@ The npm script usually looks like this:
 Run all discovered tests:
 
 ```bash
-npx orbittest run
+orbittest run
 ```
 
 Or use the npm script:
@@ -69,13 +70,13 @@ npm run test:e2e
 Run one file:
 
 ```bash
-npx orbittest run tests/login.test.js
+orbittest run tests/login.test.js
 ```
 
 Run all tests inside a folder:
 
 ```bash
-npx orbittest run tests
+orbittest run tests
 ```
 
 OrbitTest discovers files like:
@@ -85,26 +86,76 @@ tests/**/*.test.js
 tests/**/*.spec.js
 ```
 
+You can change this in `orbittest.config.js`:
+
+```js
+module.exports = {
+  testDir: "tests",
+  testMatch: ["**/*.test.js", "**/*.spec.js"],
+  reportsDir: "reports",
+  workers: 1,
+  maxWorkers: 4,
+  retries: 0,
+  testTimeout: 30000,
+  actionTimeout: 0,
+  environments: {
+    staging: {
+      reportsDir: "reports/staging"
+    }
+  }
+};
+```
+
+Run tests in parallel from the CLI:
+
+```bash
+orbittest run --workers 4
+```
+
+You can also set `workers` in `orbittest.config.js`.
+
+CLI flags override config values:
+
+```bash
+orbittest run --workers 2 --retries 1 --timeout 30000 --env staging
+```
+
 ## Write Your First Test
 
 Create `tests/home.test.js`:
 
 ```js
-const { test, expect, run } = require("orbittest");
+const { test, expect } = require("orbittest");
 
 test("home page loads", async (orbit) => {
   await orbit.open("https://example.com/");
 
   expect(await orbit.hasText("Example Domain")).toBe(true);
 });
+```
 
-run();
+Use hooks and per-test options when a flow needs setup, cleanup, retries, or a longer timeout:
+
+```js
+const { beforeEach, afterEach, test } = require("orbittest");
+
+beforeEach(async (orbit, testInfo) => {
+  console.log(`Starting ${testInfo.name}`);
+});
+
+afterEach(async (orbit, testInfo) => {
+  console.log(`Finished ${testInfo.name}`);
+});
+
+test("checkout", { retries: 1, timeout: 30000 }, async (orbit) => {
+  await orbit.open("https://example.com/checkout");
+});
 ```
 
 Run it:
 
 ```bash
-npx orbittest run tests/home.test.js
+orbittest run tests/home.test.js
 ```
 
 ## Basic Browser Actions
@@ -121,6 +172,14 @@ Click by visible text:
 
 ```js
 await orbit.click("Login");
+```
+
+Use mouse interactions:
+
+```js
+await orbit.hover("Menu");
+await orbit.doubleClick("Open");
+await orbit.rightClick("File");
 ```
 
 Type into an input by label, placeholder, name, or accessible text:
@@ -245,7 +304,7 @@ Prefer `waitFor()` or `waitForText()` over fixed waits because they finish as so
 ## Full Example
 
 ```js
-const { test, expect, run } = require("orbittest");
+const { test, expect } = require("orbittest");
 
 test("login flow", async (orbit) => {
   await orbit.open("https://example.com/login");
@@ -259,8 +318,6 @@ test("login flow", async (orbit) => {
   expect(await orbit.hasText("Dashboard")).toBe(true);
   expect(await orbit.exists(orbit.css(".account-menu"))).toBe(true);
 });
-
-run();
 ```
 
 ## Reports
@@ -300,7 +357,7 @@ Use a custom browser path in PowerShell:
 
 ```powershell
 $env:ORBITTEST_CHROME_PATH = "C:\Path\To\chrome.exe"
-npx orbittest run
+orbittest run
 ```
 
 ## Skip Browser Download
@@ -308,14 +365,14 @@ npx orbittest run
 If you want Puppeteer to skip downloading Chrome during install:
 
 ```bash
-PUPPETEER_SKIP_DOWNLOAD=1 npm install -D orbittest
+PUPPETEER_SKIP_DOWNLOAD=1 npm install -g orbittest
 ```
 
 On PowerShell:
 
 ```powershell
 $env:PUPPETEER_SKIP_DOWNLOAD = "1"
-npm install -D orbittest
+npm install -g orbittest
 ```
 
 If you skip the download, make sure Chrome is installed locally or set `ORBITTEST_CHROME_PATH`.
@@ -325,8 +382,8 @@ If you skip the download, make sure Chrome is installed locally or set `ORBITTES
 If no tests are found:
 
 ```bash
-npx orbittest init
-npx orbittest run
+orbittest init
+orbittest run
 ```
 
 If Chrome does not launch:
@@ -363,8 +420,5 @@ If you are developing OrbitTest itself:
 ```bash
 npm install
 npm test
-npm run build
 npm pack --dry-run
 ```
-
-The npm package publishes bundled files from `dist/`, not the full source tree.

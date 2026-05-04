@@ -3,15 +3,16 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-let chromeProcess = null;
-let userDataDir = null;
+const activeLaunches = new Set();
+let cleanupHandlersInstalled = false;
 
 async function launchChrome() {
+  installCleanupHandlers();
   const chromePath = findChromeExecutable();
 
-  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "orbittest-profile-"));
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "orbittest-profile-"));
 
-  chromeProcess = spawn(chromePath, [
+  const chromeProcess = spawn(chromePath, [
     "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=0",
     `--user-data-dir=${userDataDir}`,
@@ -30,14 +31,37 @@ async function launchChrome() {
 
   chromeProcess.unref();
 
-  const port = await waitForDevToolsPort(userDataDir, 15000);
+  const launch = {
+    process: chromeProcess,
+    userDataDir
+  };
+
+  activeLaunches.add(launch);
+
+  let port;
+
+  try {
+    port = await waitForDevToolsPort(launch, 15000);
+  } catch (error) {
+    await closeChrome(launch);
+    throw error;
+  }
 
   console.log("Fresh Chrome instance launched");
 
-  return { port };
+  return { port, launch };
 }
 
-async function closeChrome() {
+async function closeChrome(launch = null) {
+  if (!launch) {
+    const launches = Array.from(activeLaunches);
+    await Promise.all(launches.map(current => closeChrome(current)));
+    return;
+  }
+
+  activeLaunches.delete(launch);
+  const chromeProcess = launch.process;
+
   if (chromeProcess) {
     if (process.platform === "win32") {
       spawnSync("taskkill", ["/pid", String(chromeProcess.pid), "/T", "/F"], {
@@ -50,11 +74,9 @@ async function closeChrome() {
         // Chrome may have already exited.
       }
     }
-
-    chromeProcess = null;
   }
 
-  await removeUserDataDir();
+  await removeUserDataDir(launch.userDataDir);
   console.log("Chrome closed");
 }
 
@@ -109,7 +131,9 @@ function getSystemChromePaths() {
   ];
 }
 
-async function waitForDevToolsPort(profileDir, timeoutMs = 10000) {
+async function waitForDevToolsPort(launch, timeoutMs = 10000) {
+  const profileDir = launch.userDataDir;
+  const chromeProcess = launch.process;
   const activePortFile = path.join(profileDir, "DevToolsActivePort");
   const startedAt = Date.now();
 
@@ -132,13 +156,12 @@ async function waitForDevToolsPort(profileDir, timeoutMs = 10000) {
   throw new Error("Timed out waiting for Chrome debug port");
 }
 
-async function removeUserDataDir() {
+async function removeUserDataDir(userDataDir) {
   if (!userDataDir) {
     return;
   }
 
   const dir = userDataDir;
-  userDataDir = null;
 
   for (let i = 0; i < 5; i++) {
     try {
@@ -152,6 +175,52 @@ async function removeUserDataDir() {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function installCleanupHandlers() {
+  if (cleanupHandlersInstalled) {
+    return;
+  }
+
+  cleanupHandlersInstalled = true;
+
+  process.once("exit", () => {
+    cleanupActiveLaunchesSync();
+  });
+
+  process.once("SIGINT", () => {
+    cleanupActiveLaunchesSync();
+    process.exit(130);
+  });
+
+  process.once("SIGTERM", () => {
+    cleanupActiveLaunchesSync();
+    process.exit(143);
+  });
+}
+
+function cleanupActiveLaunchesSync() {
+  for (const launch of Array.from(activeLaunches)) {
+    activeLaunches.delete(launch);
+
+    try {
+      if (launch.process && process.platform === "win32") {
+        spawnSync("taskkill", ["/pid", String(launch.process.pid), "/T", "/F"], {
+          stdio: "ignore"
+        });
+      } else if (launch.process) {
+        process.kill(-launch.process.pid);
+      }
+    } catch (error) {
+      // Chrome may have already exited.
+    }
+
+    try {
+      fs.rmSync(launch.userDataDir, { recursive: true, force: true });
+    } catch (error) {
+      // Best effort cleanup during process shutdown.
+    }
+  }
 }
 
 module.exports = { launchChrome, closeChrome };

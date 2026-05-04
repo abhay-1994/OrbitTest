@@ -1,5 +1,5 @@
 const Connection = require('./connection');
-const Page = require('../page/page');
+const Page = require('../pages/page');
 const fs = require('fs');
 const path = require('path');
 

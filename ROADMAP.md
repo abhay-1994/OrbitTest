@@ -70,7 +70,7 @@ Near-term improvements:
 - Add test retries
 - Add filtering by test name
 - Add better CI-friendly output
-- Add optional parallel execution when the browser lifecycle supports it safely
+- Improve parallel execution scheduling and output
 
 ## Orbit Capsule
 
