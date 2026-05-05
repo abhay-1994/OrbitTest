@@ -2,6 +2,10 @@
 
 All notable changes to OrbitTest will be documented in this file.
 
+## 2.1.2
+
+- Updated documentation wording for live step debugging.
+
 ## 2.1.1
 
 - Added `--trace` step-by-step HTML traces with screenshots, URLs, durations, and report links.

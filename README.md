@@ -383,7 +383,7 @@ The HTML report links to each trace. A trace includes every `orbit.*` step, stat
 reports/artifacts/<run-id>/traces/
 ```
 
-Use `--step` when you want live debugging like Playwright's debug mode:
+Use `--step` when you want live, step-by-step debugging:
 
 ```bash
 orbittest run tests/login.test.js --step
