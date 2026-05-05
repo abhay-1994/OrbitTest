@@ -182,6 +182,20 @@ await orbit.doubleClick("Open");
 await orbit.rightClick("File");
 ```
 
+Click actions show a short red dot at the exact browser coordinate before the click is sent. This applies to `click()`, `doubleClick()`, and `rightClick()`, so it is visible while using `--step` and it appears in trace screenshots when the page stays on the same screen long enough.
+
+```js
+await orbit.click("Login");
+await orbit.doubleClick("Open");
+await orbit.rightClick("File");
+```
+
+If a test needs no visual marker for a specific action, pass `visualize: false`:
+
+```js
+await orbit.click("Login", { visualize: false });
+```
+
 Type into an input by label, placeholder, name, or accessible text:
 
 ```js
@@ -344,6 +358,49 @@ Open the HTML report in a browser to inspect:
 - Failure reason
 - Failure stack trace
 - Screenshot path
+
+To inspect a run step by step after it finishes, add `--trace`:
+
+```bash
+orbittest run tests/login.test.js --trace
+```
+
+The main HTML report links to each trace. Trace files are stored under:
+
+```txt
+reports/artifacts/<run-id>/traces/
+```
+
+For live debugging, use `--step`:
+
+```bash
+orbittest run tests/login.test.js --step
+```
+
+Step mode opens a small Orbit Inspector window in OrbitTest's managed testing browser, not your default browser. It runs with one worker, disables timeouts, pauses before each `orbit.*` action, and leaves the browser open at the end until you continue.
+
+During `--step`, every click action is marked in the test browser with a red dot. This helps you confirm that OrbitTest clicked the point you expected before moving to the next action.
+
+Use the inspector controls this way:
+
+- `Step`: run the next highlighted action, then pause again.
+- `Resume`: continue running without pausing on each action.
+- `Stop`: stop the current debug run.
+
+Use `--trace` when you want evidence after a run finishes. Use `--step` when you want to watch and control the run live.
+
+Useful debugging commands:
+
+```bash
+# Live debugging
+orbittest run tests/login.test.js --step
+
+# Save step screenshots and metadata
+orbittest run tests/login.test.js --trace
+
+# Debug all tests in a folder
+orbittest run tests --step
+```
 
 ## Browser Selection
 

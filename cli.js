@@ -104,7 +104,9 @@ async function runTests(args) {
     maxWorkers: config.maxWorkers,
     retries: runArgs.retries ?? config.retries,
     testTimeout: runArgs.testTimeout ?? config.testTimeout,
-    actionTimeout: config.actionTimeout
+    actionTimeout: config.actionTimeout,
+    trace: runArgs.trace,
+    step: runArgs.step
   });
 }
 
@@ -115,7 +117,9 @@ function parseRunArgs(args) {
     reportsDir: null,
     retries: null,
     testTimeout: null,
-    env: null
+    env: null,
+    trace: false,
+    step: false
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -123,6 +127,17 @@ function parseRunArgs(args) {
 
     if (arg === "--parallel") {
       parsed.workers = true;
+      continue;
+    }
+
+    if (arg === "--trace") {
+      parsed.trace = true;
+      continue;
+    }
+
+    if (arg === "--step") {
+      parsed.step = true;
+      parsed.trace = true;
       continue;
     }
 
@@ -550,20 +565,21 @@ function printHelp() {
 
 Usage:
   orbittest init
-  orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS]
+  orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS] [--trace] [--step]
   orbittest --version
   orbittest --help
 
 Examples:
   orbittest init
   orbittest run
-  orbittest run tests/login.test.js
+  orbittest run tests/login.test.js --trace
+  orbittest run tests/login.test.js --step
 `);
 }
 
 function printRunHelp() {
   console.log(`Usage:
-  orbittest run [test-file-or-directory] [--workers N|--parallel]
+  orbittest run [test-file-or-directory] [--workers N|--parallel] [--trace] [--step]
 
 When no path is provided, OrbitTest discovers:
   Files from orbittest.config.js, defaulting to:
@@ -576,5 +592,7 @@ Parallel execution:
 
 Overrides:
   orbittest run --retries 2 --timeout 30000 --reports-dir reports --env staging
+  orbittest run tests/login.test.js --trace
+  orbittest run tests/login.test.js --step
 `);
 }

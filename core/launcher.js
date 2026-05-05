@@ -143,7 +143,7 @@ async function waitForDevToolsPort(launch, timeoutMs = 10000) {
     }
 
     if (fs.existsSync(activePortFile)) {
-      const [port] = fs.readFileSync(activePortFile, "utf8").split(/\r?\n/);
+      const [port] = readDevToolsPortFile(activePortFile).split(/\r?\n/);
 
       if (port && /^\d+$/.test(port)) {
         return Number(port);
@@ -154,6 +154,22 @@ async function waitForDevToolsPort(launch, timeoutMs = 10000) {
   }
 
   throw new Error("Timed out waiting for Chrome debug port");
+}
+
+function readDevToolsPortFile(activePortFile) {
+  try {
+    return fs.readFileSync(activePortFile, "utf8");
+  } catch (error) {
+    if (isRetryableFileReadError(error)) {
+      return "";
+    }
+
+    throw error;
+  }
+}
+
+function isRetryableFileReadError(error) {
+  return ["EBUSY", "ENOENT", "EPERM"].includes(error.code);
 }
 
 async function removeUserDataDir(userDataDir) {
@@ -223,4 +239,4 @@ function cleanupActiveLaunchesSync() {
   }
 }
 
-module.exports = { launchChrome, closeChrome };
+module.exports = { launchChrome, closeChrome, findChromeExecutable };

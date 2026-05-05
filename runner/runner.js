@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { createInspectorServer } = require('./inspector');
 
 const tests = [];
 const beforeEachHooks = [];
@@ -69,9 +70,26 @@ async function runRegisteredTests(options = {}) {
   const artifactsDir = path.join(reportsDir, 'artifacts', runId);
   const workers = normalizeWorkers(options.workers || options.parallel, options.maxWorkers);
   const runOptions = normalizeRunOptions(options, workers);
-  const results = workers > 1
-    ? await runTestsInParallel({ artifactsDir, runOptions })
-    : await runTestsInSeries({ artifactsDir, runOptions });
+  let inspector = null;
+
+  if (runOptions.step) {
+    inspector = await createInspectorServer({ runId });
+    runOptions.inspector = inspector;
+    console.log(`\nStep mode enabled. Orbit Inspector: ${inspector.url}`);
+  }
+
+  let results;
+
+  try {
+    results = runOptions.workers > 1
+      ? await runTestsInParallel({ artifactsDir, runOptions })
+      : await runTestsInSeries({ artifactsDir, runOptions });
+  } finally {
+    if (inspector) {
+      inspector.finish('finished');
+      await inspector.close();
+    }
+  }
 
   const endedAt = new Date();
   const report = buildReport({
@@ -130,7 +148,9 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
 
   const testStartedAt = new Date();
   const retries = normalizeInteger(t.options.retries ?? runOptions.retries, 0);
-  const testTimeout = normalizeInteger(t.options.timeout ?? t.options.testTimeout ?? runOptions.testTimeout, runOptions.testTimeout);
+  const testTimeout = runOptions.step
+    ? 0
+    : normalizeInteger(t.options.timeout ?? t.options.testTimeout ?? runOptions.testTimeout, runOptions.testTimeout);
 
   const result = {
     name: t.name,
@@ -148,8 +168,16 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
     result.attempts = attempt + 1;
 
     const Orbit = require('../orbit');
+    const traceOptions = runOptions.trace
+      ? createTraceOptions({ artifactsDir, index, test: t, attempt })
+      : null;
+    if (runOptions.inspector) {
+      runOptions.inspector.setTest(t);
+    }
     const orbit = new Orbit({
-      actionTimeout: runOptions.actionTimeout
+      actionTimeout: runOptions.actionTimeout,
+      trace: traceOptions,
+      debug: createDebugOptions(runOptions)
     });
 
     try {
@@ -177,6 +205,8 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       result.status = 'passed';
       result.error = null;
       console.log(`Passed: ${t.name}`);
+      await attachTraceArtifact({ orbit, result, status: 'passed' });
+      await pauseBeforeClose(orbit, result);
       await closeOrbit(orbit, result);
       break;
     } catch (error) {
@@ -185,13 +215,16 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
 
       if (attempt >= retries) {
         await attachFailureScreenshot({ orbit, result, artifactsDir, index });
+        await attachTraceArtifact({ orbit, result, status: 'failed' });
         console.log(`Failed: ${t.name}`);
         console.error(`Reason: ${result.error.message}`);
       } else {
+        await attachTraceArtifact({ orbit, result, status: 'failed' });
         console.log(`Retrying: ${t.name} (${attempt + 1}/${retries})`);
         console.error(`Reason: ${result.error.message}`);
       }
 
+      await pauseBeforeClose(orbit, result);
       await closeOrbit(orbit, result);
     }
   }
@@ -228,12 +261,31 @@ async function closeOrbit(orbit, result) {
   }
 }
 
+async function pauseBeforeClose(orbit, result) {
+  if (!orbit || typeof orbit.pauseForDebugger !== 'function') {
+    return;
+  }
+
+  const status = result.status === 'passed' ? 'passed' : 'failed';
+  try {
+    await orbit.pauseForDebugger(`Test ${status}. Press Enter to close the browser, or q then Enter to stop.`);
+  } catch (error) {
+    if (error.message !== 'Step run stopped by user') {
+      throw error;
+    }
+  }
+}
+
 function normalizeRunOptions(options, workers) {
+  const step = Boolean(options.step);
+
   return {
-    workers,
+    workers: step ? 1 : workers,
     retries: normalizeInteger(options.retries, 0),
-    testTimeout: normalizeInteger(options.testTimeout || options.timeout, 30000),
-    actionTimeout: normalizeInteger(options.actionTimeout, 0)
+    testTimeout: step ? 0 : normalizeInteger(options.testTimeout || options.timeout, 30000),
+    actionTimeout: step ? 0 : normalizeInteger(options.actionTimeout, 0),
+    trace: Boolean(options.trace || step),
+    step
   };
 }
 
@@ -298,6 +350,53 @@ async function attachFailureScreenshot({ orbit, result, artifactsDir, index }) {
   }
 }
 
+async function attachTraceArtifact({ orbit, result, status }) {
+  if (!orbit || typeof orbit.writeTrace !== 'function') {
+    return;
+  }
+
+  try {
+    const tracePaths = await orbit.writeTrace({ status, error: result.error });
+
+    if (tracePaths) {
+      result.artifacts.trace = path.relative(process.cwd(), tracePaths.html);
+      result.artifacts.traceJson = path.relative(process.cwd(), tracePaths.json);
+    }
+  } catch (error) {
+    result.artifacts.traceError = serializeError(error).message;
+  }
+}
+
+function createTraceOptions({ artifactsDir, index, test, attempt }) {
+  const testSlug = slugify(test.name);
+  const attemptSuffix = attempt > 0 ? `-attempt-${attempt + 1}` : '';
+
+  return {
+    enabled: true,
+    dir: path.join(
+      artifactsDir,
+      'traces',
+      `${String(index + 1).padStart(2, '0')}-${testSlug}${attemptSuffix}`
+    ),
+    testName: test.name,
+    testFile: test.file,
+    attempt: attempt + 1
+  };
+}
+
+function createDebugOptions(runOptions) {
+  if (!runOptions.step) {
+    return null;
+  }
+
+  return {
+    enabled: true,
+    pauseBeforeActions: true,
+    pauseBeforeClose: true,
+    inspector: runOptions.inspector
+  };
+}
+
 function buildReport({ startedAt, endedAt, results, runId, testFiles, workers, retries, testTimeout }) {
   const passed = results.filter(result => result.status === 'passed').length;
   const failed = results.filter(result => result.status === 'failed').length;
@@ -338,8 +437,8 @@ function writeReports(report, reportsDir) {
 
   fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
   fs.writeFileSync(latestJsonPath, JSON.stringify(report, null, 2));
-  fs.writeFileSync(htmlPath, renderHtmlReport(report));
-  fs.writeFileSync(latestHtmlPath, renderHtmlReport(report));
+  fs.writeFileSync(htmlPath, renderHtmlReport(report, reportsDir));
+  fs.writeFileSync(latestHtmlPath, renderHtmlReport(report, reportsDir));
 
   return {
     json: path.relative(process.cwd(), jsonPath),
@@ -375,7 +474,20 @@ function printSummary(report, reportPaths) {
         if (result.artifacts.screenshot) {
           console.log(`   Screenshot: ${result.artifacts.screenshot}`);
         }
+
+        if (result.artifacts.trace) {
+          console.log(`   Trace: ${result.artifacts.trace}`);
+        }
       });
+  }
+
+  const tracedResults = report.results.filter(result => result.artifacts.trace);
+
+  if (tracedResults.length > 0) {
+    console.log('\nTraces:');
+    tracedResults.forEach((result, index) => {
+      console.log(`${index + 1}. ${result.name}: ${result.artifacts.trace}`);
+    });
   }
 
   console.log(`\nHTML report: ${reportPaths.latestHtml}`);
@@ -407,14 +519,17 @@ function getPackageVersion() {
   }
 }
 
-function renderHtmlReport(report) {
+function renderHtmlReport(report, reportsDir) {
   const statusClass = report.summary.status === 'passed' ? 'passed' : 'failed';
   const rows = report.results.map(result => {
     const error = result.error
       ? `<details><summary>${escapeHtml(result.error.message)}</summary><pre>${escapeHtml(result.error.stack)}</pre></details>`
       : '<span class="muted">None</span>';
     const screenshot = result.artifacts.screenshot
-      ? `<a href="${escapeHtml(toHref(result.artifacts.screenshot))}">View screenshot</a>`
+      ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}">View screenshot</a>`
+      : '<span class="muted">None</span>';
+    const trace = result.artifacts.trace
+      ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.trace, reportsDir))}">Open trace</a>`
       : '<span class="muted">None</span>';
 
     return `
@@ -426,6 +541,7 @@ function renderHtmlReport(report) {
         <td><span class="badge ${result.status}">${result.status}</span></td>
         <td>${formatDuration(result.durationMs)}</td>
         <td>${screenshot}</td>
+        <td>${trace}</td>
         <td>${error}</td>
       </tr>`;
   }).join('');
@@ -603,11 +719,12 @@ function renderHtmlReport(report) {
           <th>Status</th>
           <th>Duration</th>
           <th>Screenshot</th>
+          <th>Trace</th>
           <th>Failure Reason</th>
         </tr>
       </thead>
       <tbody>
-        ${rows || '<tr><td colspan="5" class="muted">No tests were registered.</td></tr>'}
+        ${rows || '<tr><td colspan="6" class="muted">No tests were registered.</td></tr>'}
       </tbody>
     </table>
   </main>
@@ -655,6 +772,10 @@ function registerHook(hooks, name, fn) {
 }
 
 function withTimeout(promise, timeoutMs, message) {
+  if (!timeoutMs) {
+    return promise;
+  }
+
   let timeout = null;
 
   const timeoutPromise = new Promise((_, reject) => {
@@ -668,6 +789,13 @@ function withTimeout(promise, timeoutMs, message) {
 
 function toHref(filePath) {
   return filePath.replace(/\\/g, '/');
+}
+
+function toHrefForReport(filePath, reportsDir) {
+  const absolutePath = path.resolve(process.cwd(), filePath);
+  const relativeToReport = path.relative(reportsDir, absolutePath);
+
+  return toHref(relativeToReport);
 }
 
 function escapeHtml(value) {

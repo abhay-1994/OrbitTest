@@ -189,6 +189,20 @@ await orbit.doubleClick("Open");
 await orbit.rightClick("File");
 ```
 
+Click actions show a short red dot at the actual browser coordinate. This makes live debugging and trace screenshots easier to follow.
+
+```js
+await orbit.click("Login");
+await orbit.doubleClick("Open");
+await orbit.rightClick("File");
+```
+
+Disable the marker for a single action when needed:
+
+```js
+await orbit.click("Login", { visualize: false });
+```
+
 ---
 
 ## Type into input
@@ -355,6 +369,32 @@ reports/latest.json
 
 ---
 
+## Step trace
+
+Use `--trace` when you want a step-by-step report after the run:
+
+```bash
+orbittest run tests/login.test.js --trace
+```
+
+The HTML report links to each trace. A trace includes every `orbit.*` step, status, duration, URL/title, and screenshots under:
+
+```txt
+reports/artifacts/<run-id>/traces/
+```
+
+Use `--step` when you want live debugging like Playwright's debug mode:
+
+```bash
+orbittest run tests/login.test.js --step
+```
+
+Step mode opens a small Orbit Inspector window in OrbitTest's managed testing browser, not your default browser. It runs with one worker, disables test/action timeouts, pauses before each `orbit.*` action, and keeps the browser open until you continue at the end. It also writes a trace automatically.
+
+Click actions are marked with a red dot in the test browser, so you can see exactly where OrbitTest clicked while stepping through the test.
+
+---
+
 ## Failure screenshots
 
 ```
@@ -446,6 +486,18 @@ orbittest run --workers 4
 ```
 
 Or set workers in `orbittest.config.js`.
+
+Create a step-by-step trace:
+
+```bash
+orbittest run tests/login.test.js --trace
+```
+
+Live step debugging:
+
+```bash
+orbittest run tests/login.test.js --step
+```
 
 Override config from the CLI:
 

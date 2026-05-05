@@ -4,3 +4,4 @@ reports/
 chrome-profile/
 tmp-profile-*/
 npm-debug.log*
+.vscode/

@@ -30,8 +30,8 @@ function normalizeWaitOptions(options = {}) {
   }
 
   return {
-    timeout: Number(options.timeout || options.timeoutMs || 5000),
-    interval: Number(options.interval || options.intervalMs || 100)
+    timeout: Number(options.timeout ?? options.timeoutMs ?? 5000),
+    interval: Number(options.interval ?? options.intervalMs ?? 100)
   };
 }
 

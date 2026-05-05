@@ -7,7 +7,7 @@ async function waitForText(connection, text, options = {}) {
     const waitOptions = normalizeWaitOptions(options);
 
     await waitUntil(
-      () => hasText(connection, text, { log: false }),
+      () => hasText(connection, text, { log: false, timeout: 0 }),
       waitOptions,
       `Timed out after ${waitOptions.timeout}ms waiting for text "${text}"`
     );

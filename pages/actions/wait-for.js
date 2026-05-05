@@ -8,7 +8,7 @@ async function waitFor(connection, target, options = {}) {
     const waitOptions = normalizeWaitOptions(options);
 
     await waitUntil(
-      () => exists(connection, target, { log: false }),
+      () => exists(connection, target, { log: false, timeout: 0 }),
       waitOptions,
       `Timed out after ${waitOptions.timeout}ms waiting for ${describeLocator(target)}`
     );

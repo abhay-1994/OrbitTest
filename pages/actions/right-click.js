@@ -1,5 +1,6 @@
 const findClickablePoint = require("./find-clickable-point");
 const { executeAction } = require("../helpers/execution");
+const { showClickPoint } = require("../helpers/click-visualizer");
 const { describeLocator } = require("../helpers/locators");
 const { normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
@@ -22,6 +23,8 @@ async function rightClick(connection, target, options = {}) {
     const { x, y } = point;
 
     console.log("Right clicking at:", x, y);
+
+    await showClickPoint(connection, x, y, options);
 
     await connection.send("Input.dispatchMouseEvent", {
       type: "mouseMoved",
