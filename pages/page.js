@@ -1,6 +1,7 @@
 const click = require("./actions/click");
 const doubleClick = require("./actions/double-click");
 const exists = require("./actions/exists");
+const all = require("./actions/all");
 const findClickablePoint = require("./actions/find-clickable-point");
 const focusInput = require("./actions/focus-input");
 const getHTML = require("./actions/get-html");
@@ -51,6 +52,10 @@ class Page {
 
   async exists(target, options = {}) {
     return exists(this.connection, target, options);
+  }
+
+  async all(target, options = {}) {
+    return all(this.connection, target, options);
   }
 
   async waitFor(target, options = {}) {

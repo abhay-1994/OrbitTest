@@ -9,6 +9,7 @@ class Connection {
     this.eventCallbacks = new Map();
     this.connectTimeoutMs = options.connectTimeoutMs || 10000;
     this.commandTimeoutMs = options.commandTimeoutMs || 15000;
+    this.log = Boolean(options.log);
     this.closed = false;
     this.closeReason = null;
   }
@@ -37,7 +38,7 @@ class Connection {
       }, this.connectTimeoutMs);
 
       this.ws.on('open', () => {
-        console.log('OrbitTest connected to Chrome');
+        this.logMessage('OrbitTest connected to Chrome');
         finish(resolve);
       });
 
@@ -164,6 +165,14 @@ class Connection {
     });
   }
 
+  onEvent(method, callback) {
+    const callbacks = this.eventCallbacks.get(method) || [];
+    callbacks.push(callback);
+    this.eventCallbacks.set(method, callbacks);
+
+    return () => this.removeEventCallback(method, callback);
+  }
+
   removeEventCallback(method, callback) {
     const callbacks = this.eventCallbacks.get(method) || [];
     const nextCallbacks = callbacks.filter(current => current !== callback);
@@ -190,6 +199,12 @@ class Connection {
 
   clearEvents(error) {
     this.eventCallbacks.clear();
+  }
+
+  logMessage(...args) {
+    if (this.log) {
+      console.log(...args);
+    }
   }
 
   terminate() {

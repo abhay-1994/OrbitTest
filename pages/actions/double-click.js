@@ -2,18 +2,19 @@ const findClickablePoint = require("./find-clickable-point");
 const { executeAction } = require("../helpers/execution");
 const { showClickPoint } = require("../helpers/click-visualizer");
 const { describeLocator } = require("../helpers/locators");
+const { dispatchMouseEvent } = require("../helpers/input");
 const { normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
 async function doubleClick(connection, target, options = {}) {
   return executeAction(`doubleClick ${describeLocator(target)}`, options, async () => {
-    console.log("Finding:", describeLocator(target));
+    logAction(options, "Finding:", describeLocator(target));
 
     let point = null;
     const waitOptions = normalizeWaitOptions(options);
 
     await waitUntil(
       async () => {
-        point = await findClickablePoint(connection, target);
+        point = await findClickablePoint(connection, target, options);
         return Boolean(point);
       },
       waitOptions,
@@ -22,37 +23,52 @@ async function doubleClick(connection, target, options = {}) {
 
     const { x, y } = point;
 
-    console.log("Double clicking at:", x, y);
+    logAction(options, "Double clicking at:", x, y);
 
     await showClickPoint(connection, x, y, options);
 
-    await connection.send("Input.dispatchMouseEvent", {
+    if ((await dispatchMouseEvent(connection, {
       type: "mouseMoved",
       x,
       y
-    });
+    }, options)).dialogOpened) {
+      return;
+    }
 
-    await dispatchClick(connection, x, y, 1);
-    await dispatchClick(connection, x, y, 2);
+    if (await dispatchClick(connection, x, y, 1, options)) {
+      return;
+    }
+
+    await dispatchClick(connection, x, y, 2, options);
   });
 }
 
-async function dispatchClick(connection, x, y, clickCount) {
-  await connection.send("Input.dispatchMouseEvent", {
+function logAction(options, ...args) {
+  if (options.log !== false) {
+    console.log(...args);
+  }
+}
+
+async function dispatchClick(connection, x, y, clickCount, options) {
+  if ((await dispatchMouseEvent(connection, {
     type: "mousePressed",
     x,
     y,
     button: "left",
     clickCount
-  });
+  }, options)).dialogOpened) {
+    return true;
+  }
 
-  await connection.send("Input.dispatchMouseEvent", {
+  const result = await dispatchMouseEvent(connection, {
     type: "mouseReleased",
     x,
     y,
     button: "left",
     clickCount
-  });
+  }, options);
+
+  return result.dialogOpened;
 }
 
 module.exports = doubleClick;

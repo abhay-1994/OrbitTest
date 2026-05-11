@@ -1,18 +1,19 @@
 const findPoint = require("./find-point");
 const { executeAction } = require("../helpers/execution");
 const { describeLocator } = require("../helpers/locators");
+const { dispatchMouseEvent } = require("../helpers/input");
 const { normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
 async function hover(connection, target, options = {}) {
   return executeAction(`hover ${describeLocator(target)}`, options, async () => {
-    console.log("Finding:", describeLocator(target));
+    logAction(options, "Finding:", describeLocator(target));
 
     let point = null;
     const waitOptions = normalizeWaitOptions(options);
 
     await waitUntil(
       async () => {
-        point = await findPoint(connection, target);
+        point = await findPoint(connection, target, options);
         return Boolean(point);
       },
       waitOptions,
@@ -21,14 +22,20 @@ async function hover(connection, target, options = {}) {
 
     const { x, y } = point;
 
-    console.log("Hovering at:", x, y);
+    logAction(options, "Hovering at:", x, y);
 
-    await connection.send("Input.dispatchMouseEvent", {
+    await dispatchMouseEvent(connection, {
       type: "mouseMoved",
       x,
       y
-    });
+    }, options);
   });
+}
+
+function logAction(options, ...args) {
+  if (options.log !== false) {
+    console.log(...args);
+  }
 }
 
 module.exports = hover;

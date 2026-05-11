@@ -2,29 +2,30 @@ const { executeAction } = require("../helpers/execution");
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");
 
-async function text(connection, target, options = {}) {
-  return executeAction(`text ${describeLocator(target)}`, options, async () => {
-    const waitOptions = normalizeTextWaitOptions(options);
+async function all(connection, target, options = {}) {
+  return executeAction(`all ${describeLocator(target)}`, options, async () => {
+    const waitOptions = normalizeAllWaitOptions(options);
     const startedAt = Date.now();
     let lastError = null;
 
     while (true) {
       try {
         const response = await connection.send("Runtime.evaluate", {
-          expression: buildLocatorExpression(target, "text"),
+          expression: buildLocatorExpression(target, "all"),
           returnByValue: true
         }, {
           timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
         });
 
         if (response.result?.exceptionDetails) {
-          throw new Error(response.result.exceptionDetails.text || `Could not evaluate ${describeLocator(target)}`);
+          throw new Error(response.result.exceptionDetails.text || `Could not find all ${describeLocator(target)}`);
         }
 
         const value = response.result?.result?.value;
+        const elements = Array.isArray(value) ? value : [];
 
-        if (value !== null && value !== undefined) {
-          return value;
+        if (elements.length > 0 || waitOptions.timeout === 0 || options.allowEmpty === true) {
+          return elements;
         }
       } catch (error) {
         lastError = error;
@@ -43,20 +44,22 @@ async function text(connection, target, options = {}) {
       throw lastError;
     }
 
-    throw new Error(`No visible element found for ${describeLocator(target)} after ${waitOptions.timeout}ms`);
+    return [];
   });
 }
 
-module.exports = text;
+module.exports = all;
 
-function normalizeTextWaitOptions(options = {}) {
+function normalizeAllWaitOptions(options = {}) {
   if (typeof options === "number") {
     return normalizeWaitOptions(options);
   }
 
+  const hasExplicitTimeout = options.timeout !== undefined || options.timeoutMs !== undefined;
+
   return normalizeWaitOptions({
     ...options,
-    timeout: options.timeout ?? options.timeoutMs ?? 5000
+    timeout: hasExplicitTimeout ? options.timeout ?? options.timeoutMs : 0
   });
 }
 

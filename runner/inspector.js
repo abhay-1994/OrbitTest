@@ -4,6 +4,13 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { findChromeExecutable } = require('../core/launcher');
+const { readLogoDataUri, renderReportLogo } = require('./report-logo');
+
+const INSPECTOR_WINDOW = {
+  width: 430,
+  height: 760,
+  margin: 24
+};
 
 async function createInspectorServer(options = {}) {
   const state = {
@@ -192,6 +199,7 @@ function loadSource(filePath) {
 function launchInspectorBrowser(url) {
   const chromePath = findChromeExecutable();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orbittest-inspector-'));
+  const position = getInspectorWindowPosition();
 
   try {
     const process = spawn(chromePath, [
@@ -202,8 +210,8 @@ function launchInspectorBrowser(url) {
       '--disable-default-apps',
       '--disable-extensions',
       '--disable-dev-shm-usage',
-      '--window-size=1040,720',
-      '--window-position=60,60',
+      `--window-size=${INSPECTOR_WINDOW.width},${INSPECTOR_WINDOW.height}`,
+      `--window-position=${position.x},${position.y}`,
       `--app=${url}`
     ], {
       detached: true,
@@ -222,6 +230,66 @@ function launchInspectorBrowser(url) {
       process: null,
       userDataDir
     };
+  }
+}
+
+function getInspectorWindowPosition() {
+  const screen = getPrimaryScreenWorkArea();
+  const fallbackX = 60;
+  const fallbackY = 40;
+
+  if (!screen) {
+    return {
+      x: fallbackX,
+      y: fallbackY
+    };
+  }
+
+  return {
+    x: Math.max(0, screen.left + screen.width - INSPECTOR_WINDOW.width - INSPECTOR_WINDOW.margin),
+    y: Math.max(0, screen.top + INSPECTOR_WINDOW.margin)
+  };
+}
+
+function getPrimaryScreenWorkArea() {
+  if (process.platform === 'win32') {
+    return getWindowsWorkArea();
+  }
+
+  return null;
+}
+
+function getWindowsWorkArea() {
+  try {
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea',
+      'Write-Output "$($area.Left),$($area.Top),$($area.Width),$($area.Height)"'
+    ].join('; ');
+    const result = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 3000
+    });
+
+    if (result.status !== 0 || !result.stdout) {
+      return null;
+    }
+
+    const values = result.stdout.trim().split(',').map(value => Number(value));
+
+    if (values.length !== 4 || values.some(value => !Number.isFinite(value))) {
+      return null;
+    }
+
+    return {
+      left: values[0],
+      top: values[1],
+      width: values[2],
+      height: values[3]
+    };
+  } catch (error) {
+    return null;
   }
 }
 
@@ -270,6 +338,7 @@ function renderInspectorHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="${readLogoDataUri()}">
   <title>Orbit Inspector</title>
   <style>
     :root {
@@ -299,8 +368,8 @@ function renderInspectorHtml() {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      padding: 14px 18px;
+      gap: 10px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--line);
       background: var(--panel);
       position: sticky;
@@ -308,15 +377,32 @@ function renderInspectorHtml() {
       z-index: 2;
     }
 
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .inspector-logo {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      display: block;
+    }
+
     h1 {
-      font-size: 18px;
+      font-size: 16px;
       margin: 0;
       letter-spacing: 0;
+      white-space: nowrap;
     }
 
     .controls {
       display: flex;
-      gap: 8px;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     button {
@@ -324,9 +410,10 @@ function renderInspectorHtml() {
       background: #fff;
       color: var(--text);
       border-radius: 8px;
-      padding: 8px 12px;
+      padding: 7px 9px;
       font-weight: 700;
       cursor: pointer;
+      font-size: 12px;
     }
 
     button.primary {
@@ -344,13 +431,13 @@ function renderInspectorHtml() {
     main {
       display: grid;
       grid-template-columns: 360px minmax(0, 1fr);
-      min-height: calc(100vh - 61px);
+      min-height: calc(100vh - 55px);
     }
 
     aside {
       border-right: 1px solid var(--line);
       background: var(--panel);
-      padding: 18px;
+      padding: 14px;
     }
 
     .status {
@@ -362,11 +449,11 @@ function renderInspectorHtml() {
       font-weight: 700;
       text-transform: uppercase;
       font-size: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
 
     .field {
-      margin: 14px 0;
+      margin: 10px 0;
     }
 
     .field span {
@@ -386,21 +473,21 @@ function renderInspectorHtml() {
       overflow: auto;
       background: var(--code);
       color: #f9fafb;
-      height: calc(100vh - 61px);
+      height: calc(100vh - 55px);
     }
 
     table {
       border-collapse: collapse;
       width: 100%;
       font-family: Consolas, Monaco, monospace;
-      font-size: 13px;
-      line-height: 1.5;
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     td {
       vertical-align: top;
       white-space: pre;
-      padding: 0 12px;
+      padding: 0 10px;
     }
 
     td.line-no {
@@ -434,12 +521,33 @@ function renderInspectorHtml() {
         border-right: 0;
         border-bottom: 1px solid var(--line);
       }
+
+      .code-wrap {
+        height: 52vh;
+      }
+    }
+
+    @media (max-width: 460px) {
+      header {
+        align-items: flex-start;
+      }
+
+      .controls {
+        max-width: 176px;
+      }
+
+      button {
+        min-width: 54px;
+      }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>Orbit Inspector</h1>
+    <div class="brand">
+      ${renderReportLogo('inspector-logo')}
+      <h1>Orbit Inspector</h1>
+    </div>
     <div class="controls">
       <button class="primary" id="step">Step</button>
       <button id="resume">Resume</button>

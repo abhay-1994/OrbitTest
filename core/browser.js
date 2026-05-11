@@ -4,8 +4,11 @@ const fs = require('fs');
 const path = require('path');
 
 class Browser {
-  constructor(wsUrl) {
-    this.connection = new Connection(wsUrl);
+  constructor(wsUrl, options = {}) {
+    this.log = Boolean(options.log);
+    this.connection = new Connection(wsUrl, {
+      log: this.log
+    });
     this.page = null;
   }
 
@@ -21,11 +24,11 @@ class Browser {
 
     this.page = new Page(this.connection);
 
-    console.log("Browser ready");
+    this.logMessage("Browser ready");
   }
 
   async waitForLoad(timeoutMs = 15000) {
-    console.log("Waiting for page load...");
+    this.logMessage("Waiting for page load...");
 
     const startedAt = Date.now();
     let lastState = "unknown";
@@ -46,7 +49,7 @@ class Browser {
           stableCompleteCount++;
 
           if (stableCompleteCount >= 2) {
-            console.log("Page loaded");
+            this.logMessage("Page loaded");
             return;
           }
         } else {
@@ -66,7 +69,7 @@ class Browser {
   async goto(url, options = {}) {
     const timeoutMs = options.timeout || options.timeoutMs || 15000;
 
-    console.log("Navigating to:", url);
+    this.logMessage("Navigating to:", url);
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -84,17 +87,20 @@ class Browser {
           throw new Error(`Navigation failed for ${url}: ${error.message || error}`);
         }
 
-        console.log(`Retrying navigation (${attempt + 1}/3)...`);
+        this.logMessage(`Retrying navigation (${attempt + 1}/3)...`);
         await delay(500 * attempt);
       }
     }
   }
 
-  async screenshot(filePath) {
-    const response = await this.connection.send("Page.captureScreenshot", {
-      format: "png",
-      fromSurface: true
-    });
+  logMessage(...args) {
+    if (this.log) {
+      console.log(...args);
+    }
+  }
+
+  async screenshot(filePath, options = {}) {
+    const response = await this.captureScreenshot(options);
 
     if (response.error) {
       throw new Error(response.error.message);
@@ -105,6 +111,51 @@ class Browser {
     fs.writeFileSync(outputPath, response.result.data, "base64");
 
     return outputPath;
+  }
+
+  async captureScreenshot(options = {}) {
+    const timeoutMs = options.timeoutMs || 15000;
+    const startedAt = Date.now();
+    let lastError = null;
+
+    try {
+      await this.connection.send("Page.bringToFront", {}, { timeoutMs: 1000 });
+    } catch (error) {
+      // Screenshot can still work when bringToFront is unavailable.
+    }
+
+    const attempts = Array.isArray(options.attempts)
+      ? options.attempts
+      : options.fast
+        ? [
+          { format: "png", fromSurface: true },
+          { format: "png", fromSurface: false }
+        ]
+        : [
+          { format: "png", fromSurface: true },
+          { format: "png", fromSurface: false },
+          { format: "png", fromSurface: true, captureBeyondViewport: false },
+          { format: "png", fromSurface: false, captureBeyondViewport: false }
+        ];
+
+    for (const params of attempts) {
+      const elapsed = Date.now() - startedAt;
+      const remaining = timeoutMs - elapsed;
+
+      if (remaining <= 0) {
+        break;
+      }
+
+      try {
+        return await this.connection.send("Page.captureScreenshot", params, {
+          timeoutMs: Math.max(500, Math.min(remaining, Math.ceil(timeoutMs / attempts.length)))
+        });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("Unable to capture screenshot");
   }
 
   close() {

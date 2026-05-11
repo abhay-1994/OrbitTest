@@ -6,5 +6,21 @@ module.exports = {
   maxWorkers: 4,
   retries: 0,
   testTimeout: 30000,
-  actionTimeout: 0
+  actionTimeout: 0,
+  openReportOnFailure: {
+    enabled: !process.env.CI,
+    port: 0
+  },
+  ci: {
+    enabled: Boolean(process.env.CI),
+    retries: 1,
+    trace: "on-failure",
+    screenshot: "on-failure",
+    failFast: false,
+    maxFailures: 0,
+    shard: process.env.ORBITTEST_SHARD || null,
+    summary: true,
+    junit: true,
+    githubAnnotations: Boolean(process.env.GITHUB_ACTIONS)
+  }
 };

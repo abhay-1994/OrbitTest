@@ -19,6 +19,8 @@ async function waitForVisible(connection, target, options) {
       const response = await connection.send("Runtime.evaluate", {
         expression: buildLocatorExpression(target, "exists"),
         returnByValue: true
+      }, {
+        timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
       });
 
       if (response.result?.exceptionDetails) {
@@ -53,10 +55,26 @@ function normalizeCheckWaitOptions(options = {}) {
     return normalizeWaitOptions(options);
   }
 
-  return normalizeWaitOptions({
+  const waitOptions = normalizeWaitOptions({
     ...options,
     timeout: options.timeout ?? options.timeoutMs ?? 5000
   });
+
+  return {
+    ...waitOptions,
+    locatorTimeout: options.locatorTimeout,
+    locatorTimeoutMs: options.locatorTimeoutMs
+  };
 }
 
 module.exports = exists;
+
+function normalizeInteger(value, fallback) {
+  const number = Number(value ?? fallback);
+
+  if (!Number.isFinite(number) || number < 0) {
+    return fallback;
+  }
+
+  return Math.floor(number);
+}

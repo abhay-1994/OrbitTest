@@ -2,18 +2,19 @@ const findClickablePoint = require("./find-clickable-point");
 const { executeAction } = require("../helpers/execution");
 const { showClickPoint } = require("../helpers/click-visualizer");
 const { describeLocator } = require("../helpers/locators");
+const { dispatchMouseEvent } = require("../helpers/input");
 const { normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
 async function rightClick(connection, target, options = {}) {
   return executeAction(`rightClick ${describeLocator(target)}`, options, async () => {
-    console.log("Finding:", describeLocator(target));
+    logAction(options, "Finding:", describeLocator(target));
 
     let point = null;
     const waitOptions = normalizeWaitOptions(options);
 
     await waitUntil(
       async () => {
-        point = await findClickablePoint(connection, target);
+        point = await findClickablePoint(connection, target, options);
         return Boolean(point);
       },
       waitOptions,
@@ -22,32 +23,42 @@ async function rightClick(connection, target, options = {}) {
 
     const { x, y } = point;
 
-    console.log("Right clicking at:", x, y);
+    logAction(options, "Right clicking at:", x, y);
 
     await showClickPoint(connection, x, y, options);
 
-    await connection.send("Input.dispatchMouseEvent", {
+    if ((await dispatchMouseEvent(connection, {
       type: "mouseMoved",
       x,
       y
-    });
+    }, options)).dialogOpened) {
+      return;
+    }
 
-    await connection.send("Input.dispatchMouseEvent", {
+    if ((await dispatchMouseEvent(connection, {
       type: "mousePressed",
       x,
       y,
       button: "right",
       clickCount: 1
-    });
+    }, options)).dialogOpened) {
+      return;
+    }
 
-    await connection.send("Input.dispatchMouseEvent", {
+    await dispatchMouseEvent(connection, {
       type: "mouseReleased",
       x,
       y,
       button: "right",
       clickCount: 1
-    });
+    }, options);
   });
+}
+
+function logAction(options, ...args) {
+  if (options.log !== false) {
+    console.log(...args);
+  }
 }
 
 module.exports = rightClick;

@@ -79,3 +79,74 @@ test("Open an isolated page", { retries: 1, timeout: 10000 }, async (orbit) => {
 
   expect(await orbit.hasText("Second test ready")).toBe(true);
 });
+
+test("Read page title and URL", async (orbit) => {
+  const html = `<title>Orbit Sample Page</title><main><h1>Title URL ready</h1></main>`;
+
+  await orbit.open(`data:text/html,${encodeURIComponent(html)}`);
+
+  const page = await orbit.pageState();
+
+  expect(await orbit.title()).toBe("Orbit Sample Page");
+  expect(await orbit.url()).toContain("data:text/html");
+  expect(page.title).toBe("Orbit Sample Page");
+  expect(page.url).toContain("data:text/html");
+});
+
+test("Iterate over all matched elements", async (orbit) => {
+  const html = `
+    <button data-id="alpha">Alpha</button>
+    <button data-id="beta">Beta</button>
+    <button data-id="gamma">Gamma</button>
+    <script>
+      const clicked = [];
+
+      document.querySelectorAll("button").forEach(button => {
+        button.addEventListener("click", () => {
+          clicked.push(button.getAttribute("data-id"));
+          document.body.setAttribute("data-clicked", clicked.join(","));
+        });
+      });
+    </script>
+  `;
+
+  await orbit.open(`data:text/html,${encodeURIComponent(html)}`);
+
+  const buttons = await orbit.all(orbit.css("button"));
+  const labels = [];
+
+  expect(buttons.length).toBe(3);
+
+  for (const button of buttons) {
+    labels.push(await orbit.text(button));
+    await orbit.click(button);
+  }
+
+  expect(labels.map(label => label.split(/\s+/)[0]).join(",")).toBe("Alpha,Beta,Gamma");
+  expect(await orbit.exists(orbit.getByAttribute("data-clicked", "alpha,beta,gamma"))).toBe(true);
+});
+
+test("Prefer the most actionable visible text match", async (orbit) => {
+  const html = `
+    <section id="wrapper">
+      <div>Save</div>
+      <button id="save">Save</button>
+      <button id="cancel">Cancel</button>
+    </section>
+    <script>
+      document.querySelector("#save").addEventListener("click", () => {
+        document.body.setAttribute("data-clicked", "save");
+      });
+      document.querySelector("#cancel").addEventListener("click", () => {
+        document.body.setAttribute("data-clicked", "cancel");
+      });
+    </script>
+  `;
+
+  await orbit.open(`data:text/html,${encodeURIComponent(html)}`);
+  await orbit.click("Save");
+
+  expect(await orbit.exists(orbit.getByAttribute("data-clicked", "save"))).toBe(true);
+  expect(await orbit.text(orbit.css("#save"))).toBe("Save");
+  expect(await orbit.text(orbit.nth(orbit.css("button"), 1))).toBe("Cancel");
+});

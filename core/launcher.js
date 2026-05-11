@@ -6,9 +6,10 @@ const path = require("path");
 const activeLaunches = new Set();
 let cleanupHandlersInstalled = false;
 
-async function launchChrome() {
+async function launchChrome(options = {}) {
   installCleanupHandlers();
   const chromePath = findChromeExecutable();
+  const log = Boolean(options.log);
 
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "orbittest-profile-"));
 
@@ -33,7 +34,8 @@ async function launchChrome() {
 
   const launch = {
     process: chromeProcess,
-    userDataDir
+    userDataDir,
+    log
   };
 
   activeLaunches.add(launch);
@@ -47,7 +49,7 @@ async function launchChrome() {
     throw error;
   }
 
-  console.log("Fresh Chrome instance launched");
+  logMessage(log, "Fresh Chrome instance launched");
 
   return { port, launch };
 }
@@ -77,7 +79,7 @@ async function closeChrome(launch = null) {
   }
 
   await removeUserDataDir(launch.userDataDir);
-  console.log("Chrome closed");
+  logMessage(launch.log, "Chrome closed");
 }
 
 function findChromeExecutable() {
@@ -191,6 +193,12 @@ async function removeUserDataDir(userDataDir) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function logMessage(enabled, ...args) {
+  if (enabled) {
+    console.log(...args);
+  }
 }
 
 function installCleanupHandlers() {

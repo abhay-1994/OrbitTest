@@ -10,7 +10,7 @@ async function type(connection, target, value, options = {}) {
 
     await waitUntil(
       async () => {
-        found = await focusInput(connection, target);
+        found = await focusInput(connection, target, options);
         return found;
       },
       waitOptions,
@@ -22,6 +22,7 @@ async function type(connection, target, value, options = {}) {
     }
 
     await typeLikeKeyboard(connection, value, options);
+    await syncActiveInputValue(connection, value);
   });
 }
 
@@ -39,6 +40,54 @@ async function typeLikeKeyboard(connection, value, options = {}) {
       await delay(delayMs);
     }
   }
+}
+
+async function syncActiveInputValue(connection, value) {
+  const expression = `(() => {
+    const element = document.activeElement;
+    const value = ${JSON.stringify(String(value))};
+
+    if (!element) {
+      return { synced: false, reason: 'No active element' };
+    }
+
+    if (element.isContentEditable) {
+      element.textContent = value;
+      element.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: value
+      }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return { synced: true, value: element.textContent };
+    }
+
+    if (!('value' in element)) {
+      return { synced: false, reason: 'Active element has no value property' };
+    }
+
+    const prototype = Object.getPrototypeOf(element);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+
+    if (descriptor && typeof descriptor.set === 'function') {
+      descriptor.set.call(element, value);
+    } else {
+      element.value = value;
+    }
+
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: value
+    }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return { synced: true, value: element.value };
+  })()`;
+
+  await connection.send("Runtime.evaluate", {
+    expression,
+    returnByValue: true
+  });
 }
 
 function normalizeDelay(value) {

@@ -11,7 +11,14 @@ async function waitUntil(check, options, timeoutMessage) {
       lastError = error;
     }
 
-    await delay(options.interval);
+    const elapsed = Date.now() - startedAt;
+    const remaining = options.timeout - elapsed;
+
+    if (remaining <= 0) {
+      break;
+    }
+
+    await delay(Math.min(options.interval, remaining));
   }
 
   if (lastError) {
@@ -24,15 +31,25 @@ async function waitUntil(check, options, timeoutMessage) {
 function normalizeWaitOptions(options = {}) {
   if (typeof options === "number") {
     return {
-      timeout: options,
+      timeout: normalizeInteger(options, 5000),
       interval: 100
     };
   }
 
   return {
-    timeout: Number(options.timeout ?? options.timeoutMs ?? 5000),
-    interval: Number(options.interval ?? options.intervalMs ?? 100)
+    timeout: normalizeInteger(options.timeout ?? options.timeoutMs, 5000),
+    interval: Math.max(10, normalizeInteger(options.interval ?? options.intervalMs, 100))
   };
+}
+
+function normalizeInteger(value, fallback) {
+  const number = Number(value ?? fallback);
+
+  if (!Number.isFinite(number) || number < 0) {
+    return fallback;
+  }
+
+  return Math.floor(number);
 }
 
 function delay(ms) {

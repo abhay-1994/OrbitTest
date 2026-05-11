@@ -26,9 +26,36 @@ async function getWebSocketUrl(port, options = {}) {
   throw new Error(`Could not get Chrome WebSocket URL after ${timeoutMs}ms: ${lastError?.message || "unknown error"}`);
 }
 
+async function listPageTargets(port) {
+  const targets = await fetchTargets(port);
+
+  return targets
+    .filter(target => target.type === "page" && target.webSocketDebuggerUrl)
+    .map(target => ({
+      id: target.id,
+      title: target.title || "",
+      url: target.url || "",
+      type: target.type,
+      webSocketDebuggerUrl: target.webSocketDebuggerUrl,
+      attached: Boolean(target.attached)
+    }));
+}
+
+async function activateTarget(port, targetId) {
+  await callJsonEndpoint(port, `/json/activate/${encodeURIComponent(targetId)}`);
+}
+
+async function closeTarget(port, targetId) {
+  await callJsonEndpoint(port, `/json/close/${encodeURIComponent(targetId)}`);
+}
+
 function fetchTargets(port) {
+  return callJsonEndpoint(port, "/json");
+}
+
+function callJsonEndpoint(port, endpoint) {
   return new Promise((resolve, reject) => {
-    const request = http.get(`http://127.0.0.1:${port}/json`, (res) => {
+    const request = http.get(`http://127.0.0.1:${port}${endpoint}`, (res) => {
       let data = "";
 
       res.setEncoding("utf8");
@@ -40,9 +67,13 @@ function fetchTargets(port) {
             return;
           }
 
-          resolve(JSON.parse(data));
+          try {
+            resolve(JSON.parse(data));
+          } catch (error) {
+            resolve(data);
+          }
         } catch (error) {
-          reject(new Error(`Invalid Chrome target response: ${error.message}`));
+          reject(new Error(`Invalid Chrome target response from ${endpoint}: ${error.message}`));
         }
       });
     });
@@ -60,3 +91,7 @@ function delay(ms) {
 }
 
 module.exports = getWebSocketUrl;
+module.exports.fetchTargets = fetchTargets;
+module.exports.listPageTargets = listPageTargets;
+module.exports.activateTarget = activateTarget;
+module.exports.closeTarget = closeTarget;
