@@ -1,13 +1,25 @@
 #!/usr/bin/env node
 
-const fs = require("fs");
 const path = require("path");
 const Module = require("module");
+const { spawn } = require("child_process");
 
 const packageApiPath = path.join(__dirname, "orbit.js");
 const packageJson = require("./package.json");
 const resolveFilename = Module._resolveFilename;
 const packageApi = require("./orbit");
+const {
+  discoverTestFiles,
+  loadConfig,
+  mergeCiOptions,
+  mergeOpenReportOnFailureOptions,
+  parseShardValue,
+  resolveBrowserDisplay,
+  resolveRetries,
+  resolveScreenshotMode,
+  resolveTraceMode
+} = require("./core/config");
+const { initProject } = require("./core/scaffold");
 
 Module._resolveFilename = function resolveOrbitTest(request, parent, isMain, options) {
   if (request === "orbittest") {
@@ -55,9 +67,71 @@ async function main() {
     return;
   }
 
+  if (command === "studio" || command === "ui") {
+    await studioCommand(args.slice(1));
+    return;
+  }
+
   console.error(`Unknown command: ${command}`);
   printHelp();
   process.exit(1);
+}
+
+async function studioCommand(args) {
+  if (args.includes("-h") || args.includes("--help")) {
+    printStudioHelp();
+    return;
+  }
+
+  const studioArgs = parseStudioArgs(args);
+  validateStudioArgs(studioArgs);
+
+  const { startStudioServer } = require("./runner/studio-server");
+  const studio = await startStudioServer({
+    root: process.cwd(),
+    host: studioArgs.host || "127.0.0.1",
+    port: studioArgs.port !== null ? Number(studioArgs.port) : 9323,
+    reportsDir: studioArgs.reportsDir || null
+  });
+
+  console.log("\nOrbitTest Studio");
+  console.log("----------------");
+  console.log(`URL: ${studio.url}`);
+  console.log(`Project: ${studio.root}`);
+  console.log(`Reports: ${path.relative(process.cwd(), studio.reportsDir) || "."}`);
+  console.log("Press Ctrl+C to stop.");
+
+  let stoppingStudio = false;
+  const stopStudio = async signal => {
+    if (stoppingStudio) {
+      return;
+    }
+
+    stoppingStudio = true;
+    console.log("\nStopping OrbitTest Studio...");
+
+    try {
+      await studio.close();
+      console.log("OrbitTest Studio stopped.");
+    } catch (error) {
+      console.error(`Failed to stop OrbitTest Studio cleanly: ${error.message || error}`);
+    }
+
+    if (signal) {
+      process.exit(0);
+    }
+  };
+
+  process.once("SIGINT", () => {
+    stopStudio("SIGINT");
+  });
+  process.once("SIGTERM", () => {
+    stopStudio("SIGTERM");
+  });
+
+  if (studioArgs.openBrowser) {
+    openUrlInDefaultBrowser(studio.url);
+  }
 }
 
 async function runTests(args) {
@@ -88,6 +162,8 @@ async function runTests(args) {
   const runner = require("./runner/runner");
   runner.resetTests();
 
+  await loadGlobalSetupFiles(config.globalSetup, config);
+
   for (const file of testFiles) {
     process.env.ORBITTEST_LOADING_FILE = file;
     require(file);
@@ -104,6 +180,7 @@ async function runTests(args) {
 
   const ciOptions = mergeCiOptions(config.ci, runArgs);
   const traceMode = resolveTraceMode(runArgs, config);
+  const browserDisplay = resolveBrowserDisplay(runArgs, config, ciOptions);
 
   if (ciOptions.enabled && runArgs.step) {
     throw new Error("--step is interactive and cannot run in CI mode. Use --no-ci for a local debug run.");
@@ -117,6 +194,8 @@ async function runTests(args) {
     retries: resolveRetries(runArgs, config),
     testTimeout: runArgs.testTimeout ?? config.testTimeout,
     actionTimeout: config.actionTimeout,
+    globalSetup: config.globalSetup,
+    browserDisplay,
     trace: traceMode !== "off",
     traceMode,
     screenshot: resolveScreenshotMode(runArgs, config),
@@ -128,6 +207,37 @@ async function runTests(args) {
     reportRetention: config.reportRetention,
     ci: ciOptions
   });
+}
+
+async function loadGlobalSetupFiles(globalSetup, config) {
+  const setupFiles = Array.isArray(globalSetup)
+    ? globalSetup
+    : globalSetup
+      ? [globalSetup]
+      : [];
+
+  for (const setupFile of setupFiles) {
+    const resolved = path.resolve(process.cwd(), setupFile);
+
+    try {
+      const setupModule = require(resolved);
+      const setupFn = typeof setupModule === "function"
+        ? setupModule
+        : setupModule && typeof setupModule.default === "function"
+          ? setupModule.default
+          : null;
+
+      if (setupFn) {
+        await setupFn({
+          root: process.cwd(),
+          config,
+          file: resolved
+        });
+      }
+    } catch (error) {
+      throw new Error(`Failed to load globalSetup "${setupFile}": ${error.message || error}`);
+    }
+  }
 }
 
 function cleanReportsCommand(args) {
@@ -256,6 +366,85 @@ function validateCleanReportsArgs(args) {
   }
 }
 
+function parseStudioArgs(args) {
+  const parsed = {
+    host: null,
+    port: null,
+    reportsDir: null,
+    openBrowser: true,
+    unknownArgs: []
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "--no-open") {
+      parsed.openBrowser = false;
+      continue;
+    }
+
+    if (arg === "--open") {
+      parsed.openBrowser = true;
+      continue;
+    }
+
+    if (arg === "--host") {
+      parsed.host = readOptionValue(args, i, "--host");
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--host=")) {
+      parsed.host = arg.slice("--host=".length);
+      continue;
+    }
+
+    if (arg === "--port") {
+      parsed.port = readOptionValue(args, i, "--port");
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--port=")) {
+      parsed.port = arg.slice("--port=".length);
+      continue;
+    }
+
+    if (arg === "--reports-dir") {
+      parsed.reportsDir = readOptionValue(args, i, "--reports-dir");
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--reports-dir=")) {
+      parsed.reportsDir = arg.slice("--reports-dir=".length);
+      continue;
+    }
+
+    parsed.unknownArgs.push(arg);
+  }
+
+  return parsed;
+}
+
+function validateStudioArgs(args) {
+  if (args.unknownArgs.length > 0) {
+    throw new Error(`Unknown studio option: ${args.unknownArgs[0]}`);
+  }
+
+  if (args.port !== null) {
+    validatePortArg(args.port, "--port");
+  }
+
+  if (args.host !== null && !String(args.host).trim()) {
+    throw new Error("--host requires a non-empty value.");
+  }
+
+  if (args.reportsDir !== null && !String(args.reportsDir).trim()) {
+    throw new Error("--reports-dir requires a non-empty value.");
+  }
+}
+
 function parseRunArgs(args) {
   const parsed = {
     testInputs: [],
@@ -268,6 +457,7 @@ function parseRunArgs(args) {
     step: false,
     smartReport: null,
     verbose: false,
+    browserDisplay: null,
     ci: null,
     failFast: null,
     maxFailures: null,
@@ -304,6 +494,16 @@ function parseRunArgs(args) {
 
     if (arg === "--verbose") {
       parsed.verbose = true;
+      continue;
+    }
+
+    if (arg === "--show-browser") {
+      parsed.browserDisplay = "show";
+      continue;
+    }
+
+    if (arg === "--hide-browser") {
+      parsed.browserDisplay = "hide";
       continue;
     }
 
@@ -479,6 +679,10 @@ function validateRunArgs(args) {
     throw new Error("--ci cannot be used with --step. Step mode is interactive and should stay local.");
   }
 
+  if (args.step && args.browserDisplay === "hide") {
+    throw new Error("--hide-browser cannot be used with --step because step mode needs a visible browser.");
+  }
+
   if (args.reportsDir !== null && !String(args.reportsDir).trim()) {
     throw new Error("--reports-dir requires a non-empty value.");
   }
@@ -530,620 +734,23 @@ function validateShardArg(value, name) {
   }
 }
 
-function initProject() {
-  const cwd = process.cwd();
-  const testsDir = path.join(cwd, "tests");
-  const samplePath = path.join(testsDir, "example.test.js");
-  const configPath = path.join(cwd, "orbittest.config.js");
-  const packagePath = path.join(cwd, "package.json");
-  const gitignorePath = path.join(cwd, ".gitignore");
-
-  fs.mkdirSync(testsDir, { recursive: true });
-
-  if (!fs.existsSync(samplePath)) {
-    fs.writeFileSync(samplePath, getSampleTest());
-    console.log(`Created ${path.relative(cwd, samplePath)}`);
-  } else {
-    console.log(`Kept existing ${path.relative(cwd, samplePath)}`);
-  }
-
-  if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, getSampleConfig());
-    console.log(`Created ${path.relative(cwd, configPath)}`);
-  } else {
-    console.log(`Kept existing ${path.relative(cwd, configPath)}`);
-  }
-
-  ensurePackageScript(packagePath);
-  ensureGitignoreEntry(gitignorePath, "reports/");
-
-  console.log("\nOrbitTest is ready.");
-  console.log("Run your tests with:");
-  console.log("  orbittest run");
-}
-
-function discoverTestFiles(inputs, config = getDefaultConfig()) {
-  const cwd = process.cwd();
-  const roots = inputs.length > 0 ? inputs : [config.testDir];
-  const found = [];
-
-  for (const input of roots) {
-    const resolved = path.resolve(cwd, input);
-
-    if (!fs.existsSync(resolved)) {
-      continue;
-    }
-
-    const stat = fs.statSync(resolved);
-
-    if (stat.isDirectory()) {
-      found.push(...findTestsInDirectory(resolved, config, cwd));
-    } else if (stat.isFile() && isTestFile(resolved, config, cwd)) {
-      found.push(resolved);
-    }
-  }
-
-  return Array.from(new Set(found)).sort();
-}
-
-function findTestsInDirectory(dir, config, cwd) {
-  const files = [];
-
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-
-    if (entry.isDirectory()) {
-      if (entry.name === "node_modules" || entry.name === "reports") {
-        continue;
-      }
-
-      files.push(...findTestsInDirectory(fullPath, config, cwd));
-      continue;
-    }
-
-    if (entry.isFile() && isTestFile(fullPath, config, cwd)) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
-
-function isTestFile(filePath, config, cwd) {
-  return config.testMatch.some(pattern => matchesGlob(filePath, pattern, cwd));
-}
-
-function loadConfig(cwd) {
-  const configPath = path.join(cwd, "orbittest.config.js");
-
-  let config = {};
-
-  if (fs.existsSync(configPath)) {
-    const loaded = require(configPath);
-    config = typeof loaded === "function" ? loaded() : loaded;
-
-    if (!config || typeof config !== "object" || Array.isArray(config)) {
-      throw new Error("orbittest.config.js must export an object.");
-    }
-  }
-
-  return normalizeConfig(applyEnvironmentConfig(config));
-}
-
-function normalizeConfig(config = {}) {
-  const defaults = getDefaultConfig();
-  validateConfigKeys(config, defaults);
-
-  const testMatch = Array.isArray(config.testMatch)
-    ? config.testMatch
-    : config.testMatch
-      ? [config.testMatch]
-      : defaults.testMatch;
-
-  const normalized = {
-    testDir: normalizeString(config.testDir, defaults.testDir, "testDir"),
-    testMatch,
-    reportsDir: normalizeString(config.reportsDir, defaults.reportsDir, "reportsDir"),
-    workers: config.parallel === true
-      ? true
-      : normalizePositiveInteger(config.workers, defaults.workers, "workers"),
-    maxWorkers: normalizePositiveInteger(config.maxWorkers, defaults.maxWorkers, "maxWorkers"),
-    retries: normalizeNonNegativeInteger(config.retries, defaults.retries, "retries"),
-    testTimeout: normalizePositiveInteger(config.testTimeout, defaults.testTimeout, "testTimeout"),
-    actionTimeout: normalizeNonNegativeInteger(config.actionTimeout, defaults.actionTimeout, "actionTimeout"),
-    smartReport: Boolean(config.smartReport ?? defaults.smartReport),
-    smartReportSlowRequestMs: normalizeNonNegativeInteger(config.smartReportSlowRequestMs, defaults.smartReportSlowRequestMs, "smartReportSlowRequestMs"),
-    openReportOnFailure: normalizeOpenReportOnFailureConfig(config.openReportOnFailure, defaults.openReportOnFailure),
-    reportRetention: normalizeReportRetentionConfig(config.reportRetention, defaults.reportRetention),
-    ci: normalizeCiConfig(config.ci, defaults.ci)
-  };
-
-  if (normalized.testMatch.some(pattern => typeof pattern !== "string" || !pattern.trim())) {
-    throw new Error("Invalid orbittest.config.js: testMatch must contain non-empty strings.");
-  }
-
-  return normalized;
-}
-
-function getDefaultConfig() {
-  return {
-    testDir: "tests",
-    testMatch: ["**/*.test.js", "**/*.spec.js"],
-    reportsDir: "reports",
-    workers: 1,
-    maxWorkers: 4,
-    retries: 0,
-    testTimeout: 30000,
-    actionTimeout: 0,
-    smartReport: false,
-    smartReportSlowRequestMs: 2000,
-    openReportOnFailure: {
-      enabled: !isCi(),
-      host: "127.0.0.1",
-      port: 0,
-      ttlMs: 30 * 60 * 1000,
-      openBrowser: true
-    },
-    reportRetention: {
-      keepLatest: true,
-      passedRuns: 10,
-      failedRuns: 30,
-      maxAgeDays: 30,
-      autoCleanup: false
-    },
-    ci: {
-      enabled: isCi(),
-      retries: 1,
-      trace: "on-failure",
-      screenshot: "on-failure",
-      failFast: false,
-      maxFailures: 0,
-      shard: process.env.ORBITTEST_SHARD || null,
-      summary: true,
-      junit: true,
-      githubAnnotations: Boolean(process.env.GITHUB_ACTIONS)
-    }
-  };
-}
-
-function applyEnvironmentConfig(config) {
-  const envName = process.env.ORBITTEST_ENV || config.env;
-
-  if (!envName || !config.environments) {
-    return config;
-  }
-
-  if (!config.environments[envName]) {
-    throw new Error(`Invalid orbittest.config.js: environment "${envName}" was not found.`);
-  }
-
-  return {
-    ...config,
-    ...config.environments[envName],
-    environments: config.environments
-  };
-}
-
-function validateConfigKeys(config, defaults) {
-  const allowed = new Set([
-    ...Object.keys(defaults),
-    "parallel",
-    "env",
-    "environments",
-    "openReportOnFailure",
-    "reportRetention",
-    "ci"
-  ]);
-
-  for (const key of Object.keys(config)) {
-    if (!allowed.has(key)) {
-      throw new Error(`Invalid orbittest.config.js: unknown option "${key}".`);
-    }
-  }
-}
-
-function normalizeString(value, fallback, name) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function normalizePositiveInteger(value, fallback, name) {
-  if (value === undefined || value === null || value === true) {
-    return fallback;
-  }
-
-  const number = Number(value);
-
-  if (!Number.isInteger(number) || number < 1) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must be a positive integer.`);
-  }
-
-  return number;
-}
-
-function normalizeNonNegativeInteger(value, fallback, name) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  const number = Number(value);
-
-  if (!Number.isInteger(number) || number < 0) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must be a non-negative integer.`);
-  }
-
-  return number;
-}
-
-function normalizeReportRetentionConfig(value, fallback) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid orbittest.config.js: reportRetention must be an object.");
-  }
-
-  const allowed = new Set(["keepLatest", "passedRuns", "failedRuns", "maxAgeDays", "autoCleanup"]);
-
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
-      throw new Error(`Invalid orbittest.config.js: unknown reportRetention option "${key}".`);
-    }
-  }
-
-  return {
-    keepLatest: value.keepLatest !== undefined ? Boolean(value.keepLatest) : fallback.keepLatest,
-    passedRuns: normalizeNonNegativeInteger(value.passedRuns, fallback.passedRuns, "reportRetention.passedRuns"),
-    failedRuns: normalizeNonNegativeInteger(value.failedRuns, fallback.failedRuns, "reportRetention.failedRuns"),
-    maxAgeDays: normalizeNonNegativeInteger(value.maxAgeDays, fallback.maxAgeDays, "reportRetention.maxAgeDays"),
-    autoCleanup: Boolean(value.autoCleanup ?? fallback.autoCleanup)
-  };
-}
-
-function normalizeCiConfig(value, fallback) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value === "boolean") {
-    return {
-      ...fallback,
-      enabled: value
-    };
-  }
-
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid orbittest.config.js: ci must be a boolean or object.");
-  }
-
-  const allowed = new Set([
-    "enabled",
-    "retries",
-    "trace",
-    "screenshot",
-    "failFast",
-    "maxFailures",
-    "shard",
-    "summary",
-    "junit",
-    "githubAnnotations"
-  ]);
-
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
-      throw new Error(`Invalid orbittest.config.js: unknown ci option "${key}".`);
-    }
-  }
-
-  return {
-    enabled: value.enabled !== undefined ? Boolean(value.enabled) : fallback.enabled,
-    retries: normalizeNonNegativeInteger(value.retries, fallback.retries, "ci.retries"),
-    trace: normalizeCiMode(value.trace, fallback.trace, "ci.trace", ["off", "on", "on-failure"]),
-    screenshot: normalizeCiMode(value.screenshot, fallback.screenshot, "ci.screenshot", ["off", "on-failure"]),
-    failFast: value.failFast !== undefined ? Boolean(value.failFast) : fallback.failFast,
-    maxFailures: normalizeNonNegativeInteger(value.maxFailures, fallback.maxFailures, "ci.maxFailures"),
-    shard: normalizeShardConfig(value.shard, fallback.shard, "ci.shard"),
-    summary: value.summary !== undefined ? Boolean(value.summary) : fallback.summary,
-    junit: value.junit !== undefined ? Boolean(value.junit) : fallback.junit,
-    githubAnnotations: value.githubAnnotations !== undefined ? Boolean(value.githubAnnotations) : fallback.githubAnnotations
-  };
-}
-
-function normalizeCiMode(value, fallback, name, allowedModes) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value === "boolean") {
-    return value ? (allowedModes.includes("on") ? "on" : "on-failure") : "off";
-  }
-
-  const mode = String(value).trim().toLowerCase();
-
-  if (!allowedModes.includes(mode)) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must be one of ${allowedModes.join(", ")}.`);
-  }
-
-  return mode;
-}
-
-function normalizeShardConfig(value, fallback, name) {
-  if (value === undefined || value === null || value === "") {
-    return fallback || null;
-  }
-
-  if (!parseShardValue(value)) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must use the format current/total, for example 1/4.`);
-  }
-
-  return String(value).trim();
-}
-
-function normalizeOpenReportOnFailureConfig(value, fallback) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  if (typeof value === "boolean") {
-    return {
-      ...fallback,
-      enabled: value
-    };
-  }
-
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Invalid orbittest.config.js: openReportOnFailure must be a boolean or object.");
-  }
-
-  const allowed = new Set(["enabled", "host", "port", "ttlMs", "timeoutMs", "openBrowser"]);
-
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) {
-      throw new Error(`Invalid orbittest.config.js: unknown openReportOnFailure option "${key}".`);
-    }
-  }
-
-  return {
-    enabled: value.enabled !== undefined ? Boolean(value.enabled) : fallback.enabled,
-    host: normalizeString(value.host, fallback.host, "openReportOnFailure.host"),
-    port: normalizePortConfig(value.port, fallback.port, "openReportOnFailure.port"),
-    ttlMs: normalizeNonNegativeInteger(value.ttlMs ?? value.timeoutMs, fallback.ttlMs, "openReportOnFailure.ttlMs"),
-    openBrowser: value.openBrowser !== undefined ? Boolean(value.openBrowser) : fallback.openBrowser
-  };
-}
-
-function mergeCiOptions(configValue, runArgs) {
-  return {
-    ...configValue,
-    ...(runArgs.ci !== null ? { enabled: runArgs.ci } : {}),
-    ...(runArgs.failFast !== null ? { failFast: runArgs.failFast } : {}),
-    ...(runArgs.maxFailures !== null ? { maxFailures: Number(runArgs.maxFailures) } : {}),
-    ...(runArgs.shard !== null ? { shard: String(runArgs.shard).trim() } : {}),
-    ...(runArgs.githubAnnotations !== null ? { githubAnnotations: runArgs.githubAnnotations } : {})
-  };
-}
-
-function mergeOpenReportOnFailureOptions(configValue, runArgs, ciOptions) {
-  return {
-    ...configValue,
-    ...(
-      ciOptions?.enabled && runArgs.openReportOnFailure === null
-        ? { enabled: false }
-        : {}
-    ),
-    ...(runArgs.openReportOnFailure !== null ? { enabled: runArgs.openReportOnFailure } : {}),
-    ...(runArgs.reportPort !== null ? { port: Number(runArgs.reportPort) } : {})
-  };
-}
-
-function resolveRetries(runArgs, config) {
-  const ciOptions = mergeCiOptions(config.ci, runArgs);
-
-  if (runArgs.retries !== null) {
-    return runArgs.retries;
-  }
-
-  if (ciOptions.enabled) {
-    return ciOptions.retries;
-  }
-
-  return config.retries;
-}
-
-function resolveTraceMode(runArgs, config) {
-  const ciOptions = mergeCiOptions(config.ci, runArgs);
-
-  if (runArgs.trace) {
-    return "on";
-  }
-
-  if (ciOptions.enabled) {
-    return ciOptions.trace;
-  }
-
-  return "off";
-}
-
-function resolveScreenshotMode(runArgs, config) {
-  const ciOptions = mergeCiOptions(config.ci, runArgs);
-
-  return ciOptions.enabled ? ciOptions.screenshot : "on-failure";
-}
-
-function parseShardValue(value) {
-  const match = String(value || "").trim().match(/^(\d+)\/(\d+)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const current = Number(match[1]);
-  const total = Number(match[2]);
-
-  if (!Number.isInteger(current) || !Number.isInteger(total) || current < 1 || total < 1 || current > total) {
-    return null;
-  }
-
-  return { current, total };
-}
-
-function normalizePortConfig(value, fallback, name) {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-
-  const number = Number(value);
-
-  if (!Number.isInteger(number) || number < 0 || number > 65535) {
-    throw new Error(`Invalid orbittest.config.js: ${name} must be an integer between 0 and 65535.`);
-  }
-
-  return number;
-}
-
-function isCi() {
-  return Boolean(
-    process.env.CI ||
-    process.env.GITHUB_ACTIONS ||
-    process.env.GITLAB_CI ||
-    process.env.BITBUCKET_BUILD_NUMBER ||
-    process.env.TF_BUILD
-  );
-}
-
-function matchesGlob(filePath, pattern, cwd) {
-  const relativePath = path.relative(cwd, filePath).replace(/\\/g, "/");
-  const normalizedPattern = String(pattern).replace(/\\/g, "/").replace(/^\.\//, "");
-
-  return globToRegExp(normalizedPattern).test(relativePath);
-}
-
-function globToRegExp(pattern) {
-  let source = "^";
-
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i];
-    const next = pattern[i + 1];
-    const afterNext = pattern[i + 2];
-
-    if (char === "*" && next === "*" && afterNext === "/") {
-      source += "(?:.*\\/)?";
-      i += 2;
-      continue;
-    }
-
-    if (char === "*" && next === "*") {
-      source += ".*";
-      i += 1;
-      continue;
-    }
-
-    if (char === "*") {
-      source += "[^/]*";
-      continue;
-    }
-
-    source += escapeRegExp(char);
-  }
-
-  source += "$";
-  return new RegExp(source, "i");
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-}
-
-function ensurePackageScript(packagePath) {
-  let packageJson = {
-    scripts: {}
-  };
-
-  if (fs.existsSync(packagePath)) {
-    packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-  } else {
-    packageJson.name = path.basename(process.cwd()).toLowerCase().replace(/[^a-z0-9-]+/g, "-") || "orbittest-project";
-    packageJson.version = "1.0.0";
-  }
-
-  packageJson.scripts = packageJson.scripts || {};
-
-  if (!packageJson.scripts["test:e2e"]) {
-    packageJson.scripts["test:e2e"] = "orbittest run";
-    fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
-    console.log("Added npm script: test:e2e");
-  }
-}
-
-function ensureGitignoreEntry(gitignorePath, entry) {
-  const current = fs.existsSync(gitignorePath)
-    ? fs.readFileSync(gitignorePath, "utf8")
-    : "";
-
-  const lines = current.split(/\r?\n/).filter(Boolean);
-
-  if (!lines.includes(entry)) {
-    lines.push(entry);
-    fs.writeFileSync(gitignorePath, `${lines.join("\n")}\n`);
-    console.log(`Added ${entry} to .gitignore`);
-  }
-}
-
-function getSampleTest() {
-  return `const { test } = require("orbittest");
-
-test("Click Login", async (orbit) => {
-  await orbit.open("https://bug-orbit.vercel.app/");
-  await orbit.click("Login");
-});
-`;
-}
-
-function getSampleConfig() {
-  return `module.exports = {
-  testDir: "tests",
-  testMatch: ["**/*.test.js", "**/*.spec.js"],
-  reportsDir: "reports",
-  workers: 1,
-  maxWorkers: 4,
-  retries: 0,
-  testTimeout: 30000,
-  actionTimeout: 0,
-  openReportOnFailure: {
-    enabled: true,
-    port: 0
-  },
-  ci: {
-    enabled: Boolean(process.env.CI),
-    retries: 1,
-    trace: "on-failure",
-    screenshot: "on-failure",
-    failFast: false,
-    maxFailures: 0,
-    shard: process.env.ORBITTEST_SHARD || null,
-    summary: true,
-    junit: true,
-    githubAnnotations: Boolean(process.env.GITHUB_ACTIONS)
-  },
-  smartReport: false,
-  smartReportSlowRequestMs: 2000,
-  reportRetention: {
-    keepLatest: true,
-    passedRuns: 10,
-    failedRuns: 30,
-    maxAgeDays: 30,
-    autoCleanup: false
-  }
-};
-`;
+function openUrlInDefaultBrowser(url) {
+  const platform = process.platform;
+  const command = platform === "win32"
+    ? "cmd"
+    : platform === "darwin"
+      ? "open"
+      : "xdg-open";
+  const args = platform === "win32"
+    ? ["/c", "start", "", url]
+    : [url];
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+
+  child.unref();
 }
 
 function printHelp() {
@@ -1151,7 +758,8 @@ function printHelp() {
 
 Usage:
   orbittest init
-  orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS] [--trace] [--ci] [--shard N/M] [--fail-fast]
+  orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS] [--trace] [--ci] [--show-browser|--hide-browser]
+  orbittest studio [--port N] [--host HOST] [--no-open]
   orbittest clean-reports [--dry-run] [--passed N] [--failed N] [--max-age-days N]
   orbittest --version
   orbittest --help
@@ -1162,15 +770,17 @@ Examples:
   orbittest run tests/login.test.js --trace
   orbittest run tests/login.test.js --step
   orbittest run tests/login.test.js --smart-report
+  orbittest run tests/login.test.js --hide-browser
   orbittest run --ci --workers 4 --shard 1/4
   orbittest run --ci --github-annotations
+  orbittest studio
   orbittest clean-reports --dry-run
 `);
 }
 
 function printRunHelp() {
   console.log(`Usage:
-  orbittest run [test-file-or-directory] [--workers N|--parallel] [--trace] [--step] [--smart-report] [--verbose]
+  orbittest run [test-file-or-directory] [--workers N|--parallel] [--trace] [--step] [--smart-report] [--verbose] [--show-browser|--hide-browser]
   orbittest run [test-file-or-directory] --ci [--shard N/M] [--fail-fast] [--max-failures N] [--github-annotations]
 
 When no path is provided, OrbitTest discovers:
@@ -1188,6 +798,8 @@ Overrides:
   orbittest run --ci --fail-fast
   orbittest run --ci --max-failures 3
   orbittest run --ci --github-annotations
+  orbittest run tests/login.test.js --show-browser
+  orbittest run tests/login.test.js --hide-browser
   orbittest run tests/login.test.js --trace
   orbittest run tests/login.test.js --step
   orbittest run tests/login.test.js --smart-report
@@ -1206,5 +818,21 @@ Examples:
   orbittest clean-reports
   orbittest clean-reports --passed 10 --failed 30 --max-age-days 30
   orbittest clean-reports --reports-dir reports/debug --dry-run
+`);
+}
+
+function printStudioHelp() {
+  console.log(`Usage:
+  orbittest studio [--port N] [--host HOST] [--reports-dir DIR] [--no-open]
+  orbittest ui [--port N] [--host HOST] [--reports-dir DIR] [--no-open]
+
+OrbitTest Studio starts a local dashboard for running tests, reading reports,
+and inspecting recent failures.
+
+Examples:
+  orbittest studio
+  orbittest studio --port 9323
+  orbittest studio --no-open
+  orbittest ui --reports-dir reports/staging
 `);
 }

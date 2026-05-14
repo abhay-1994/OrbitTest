@@ -10,10 +10,11 @@ async function launchChrome(options = {}) {
   installCleanupHandlers();
   const chromePath = findChromeExecutable();
   const log = Boolean(options.log);
+  const hideBrowser = Boolean(options.headless || options.hideBrowser);
 
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "orbittest-profile-"));
 
-  const chromeProcess = spawn(chromePath, [
+  const chromeArgs = [
     "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=0",
     `--user-data-dir=${userDataDir}`,
@@ -23,11 +24,23 @@ async function launchChrome(options = {}) {
     "--disable-default-apps",
     "--disable-extensions",
     "--disable-dev-shm-usage",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
     "--disable-popup-blocking",
     "about:blank"
-  ], {
+  ];
+
+  if (hideBrowser) {
+    chromeArgs.splice(chromeArgs.length - 1, 0, "--headless=new", "--hide-scrollbars", "--mute-audio");
+  } else {
+    chromeArgs.splice(chromeArgs.length - 1, 0, "--start-maximized", "--window-position=0,0", "--window-size=1366,900");
+  }
+
+  const chromeProcess = spawn(chromePath, chromeArgs, {
     detached: true,
-    stdio: "ignore"
+    stdio: "ignore",
+    windowsHide: hideBrowser
   });
 
   chromeProcess.unref();
@@ -49,7 +62,7 @@ async function launchChrome(options = {}) {
     throw error;
   }
 
-  logMessage(log, "Fresh Chrome instance launched");
+  logMessage(log, `Fresh Chrome instance launched (${hideBrowser ? "hidden" : "visible"})`);
 
   return { port, launch };
 }

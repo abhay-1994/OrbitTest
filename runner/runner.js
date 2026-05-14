@@ -6,6 +6,8 @@ const { createInspectorServer } = require('./inspector');
 const { renderReportLogo } = require('./report-logo');
 
 const tests = [];
+const beforeAllHooks = [];
+const afterAllHooks = [];
 const beforeEachHooks = [];
 const afterEachHooks = [];
 
@@ -31,6 +33,14 @@ function beforeEach(fn) {
 
 function afterEach(fn) {
   registerHook(afterEachHooks, 'afterEach', fn);
+}
+
+function beforeAll(fn) {
+  registerHook(beforeAllHooks, 'beforeAll', fn);
+}
+
+function afterAll(fn) {
+  registerHook(afterAllHooks, 'afterAll', fn);
 }
 
 function expect(actual) {
@@ -75,6 +85,15 @@ async function runRegisteredTests(options = {}) {
   const workers = normalizeWorkers(options.workers || options.parallel, options.maxWorkers);
   const runOptions = normalizeRunOptions(options, workers);
   const testEntries = selectTestsForRun(tests, runOptions.shard);
+  const runInfo = createRunInfo({
+    runId,
+    startedAt,
+    reportsDir,
+    testEntries,
+    workers,
+    runOptions,
+    options
+  });
   let inspector = null;
 
   if (runOptions.step) {
@@ -86,9 +105,41 @@ async function runRegisteredTests(options = {}) {
   let results;
 
   try {
-    results = runOptions.workers > 1
-      ? await runTestsInParallel({ testEntries, artifactsDir, runOptions })
-      : await runTestsInSeries({ testEntries, artifactsDir, runOptions });
+    let beforeAllError = null;
+
+    try {
+      await runAllHooks(beforeAllHooks, runInfo, runOptions.testTimeout, 'beforeAll');
+    } catch (error) {
+      beforeAllError = error;
+    }
+
+    try {
+      if (beforeAllError) {
+        results = createBeforeAllFailureResults(testEntries, beforeAllError);
+      } else {
+        results = runOptions.workers > 1
+          ? await runTestsInParallel({ testEntries, artifactsDir, runOptions })
+          : await runTestsInSeries({ testEntries, artifactsDir, runOptions });
+      }
+    } finally {
+      runInfo.results = results || [];
+      runInfo.status = getRunStatus(runInfo.results);
+      runInfo.endedAt = new Date().toISOString();
+      runInfo.durationMs = Date.parse(runInfo.endedAt) - Date.parse(runInfo.startedAt);
+
+      try {
+        await runAllHooks(afterAllHooks, runInfo, runOptions.testTimeout, 'afterAll');
+      } catch (error) {
+        const hookFailure = createGlobalHookFailureResult({
+          hookName: 'afterAll',
+          error,
+          index: (results || []).length + 1
+        });
+        results = [...(results || []), hookFailure];
+        runInfo.results = results;
+        runInfo.status = getRunStatus(results);
+      }
+    }
   } finally {
     if (inspector) {
       inspector.finish('finished');
@@ -108,6 +159,7 @@ async function runRegisteredTests(options = {}) {
     testTimeout: runOptions.testTimeout,
     ci: runOptions.ci,
     shard: runOptions.shard,
+    browserDisplay: runOptions.browserDisplay,
     totalDiscoveredTests: tests.length,
     selectedTests: testEntries.length
   });
@@ -275,6 +327,87 @@ function createSkippedResult(entry, reason) {
   };
 }
 
+function createRunInfo({ runId, startedAt, reportsDir, testEntries, workers, runOptions, options }) {
+  return {
+    runId,
+    status: 'running',
+    startedAt: startedAt.toISOString(),
+    endedAt: null,
+    durationMs: 0,
+    reportsDir,
+    workers,
+    retries: runOptions.retries,
+    testTimeout: runOptions.testTimeout,
+    browserDisplay: runOptions.browserDisplay,
+    ci: runOptions.ci,
+    shard: runOptions.shard,
+    totalDiscoveredTests: tests.length,
+    selectedTests: testEntries.length,
+    testFiles: options.testFiles || unique(testEntries.map(entry => entry.test.file).filter(Boolean)),
+    tests: testEntries.map(entry => ({
+      name: entry.test.name,
+      file: entry.test.file,
+      index: entry.originalIndex + 1,
+      options: entry.test.options || {}
+    })),
+    results: []
+  };
+}
+
+function getRunStatus(results = []) {
+  return results.some(result => result.status === 'failed') ? 'failed' : 'passed';
+}
+
+function createBeforeAllFailureResults(testEntries, error) {
+  return testEntries.map(entry => createGlobalHookFailureResult({
+    hookName: 'beforeAll',
+    error,
+    test: entry.test,
+    index: entry.originalIndex + 1
+  }));
+}
+
+function createGlobalHookFailureResult({ hookName, error, test = {}, index }) {
+  const timestamp = new Date().toISOString();
+  const serialized = serializeError(error);
+
+  return {
+    name: test.name || `${hookName} hook`,
+    file: test.file || null,
+    index,
+    status: 'failed',
+    globalHook: hookName,
+    startedAt: timestamp,
+    endedAt: timestamp,
+    durationMs: 0,
+    attempts: 0,
+    flaky: false,
+    previousErrors: [serialized],
+    error: {
+      ...serialized,
+      message: `${hookName} failed: ${serialized.message}`
+    },
+    artifacts: {},
+    diagnostics: {
+      title: `${hookName} hook failed`,
+      summary: `The ${hookName} hook failed before the run could complete normally.`,
+      likelyCause: 'Shared framework setup or cleanup threw an error.',
+      nextActions: [
+        `Review the ${hookName} hook implementation.`,
+        'Keep run-level hooks focused on shared setup and cleanup.',
+        'Move test-specific actions into the test or beforeEach/afterEach.'
+      ],
+      failedStep: null,
+      lastStep: null,
+      source: serialized.location || null,
+      page: null,
+      smartInsight: null
+    },
+    trace: null,
+    smartReport: null
+  };
+}
+
 async function runOneTest(t, index, artifactsDir, runOptions) {
   logVerbose(runOptions, `\nRunning: ${t.name}`);
 
@@ -304,6 +437,16 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     result.attempts = attempt + 1;
+    const attemptStartedAt = new Date();
+    const testInfo = createTestInfo({
+      test: t,
+      index,
+      attempt,
+      retries,
+      timeout: testTimeout,
+      startedAt: attemptStartedAt,
+      result
+    });
 
     const Orbit = require('../orbit');
     const traceOptions = runOptions.trace
@@ -314,6 +457,7 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
     }
     const orbit = new Orbit({
       actionTimeout: runOptions.actionTimeout,
+      browserDisplay: runOptions.browserDisplay,
       trace: traceOptions,
       smartReport: createSmartReportOptions({ runOptions, artifactsDir, index, test: t, attempt }),
       debug: createDebugOptions(runOptions),
@@ -322,23 +466,37 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
 
     try {
       await orbit.launch();
-      await runHooks(beforeEachHooks, orbit, t, testTimeout);
 
       let testError = null;
 
       try {
-        await withTimeout(t.fn(orbit), testTimeout, `Test timed out after ${testTimeout}ms`);
+        testInfo.phase = 'beforeEach';
+        await runHooks(beforeEachHooks, orbit, testInfo, testTimeout, 'beforeEach');
       } catch (error) {
         testError = error;
       }
 
+      if (!testError) {
+        try {
+          testInfo.phase = 'test';
+          await withTimeout(t.fn(orbit, testInfo), testTimeout, `Test timed out after ${testTimeout}ms`);
+        } catch (error) {
+          testError = error;
+        }
+      }
+
+      updateTestInfoAfterAttempt(testInfo, testError, attemptStartedAt);
+
       try {
-        await runHooks(afterEachHooks, orbit, t, testTimeout);
+        testInfo.phase = 'afterEach';
+        await runHooks(afterEachHooks, orbit, testInfo, testTimeout, 'afterEach');
       } catch (error) {
+        testInfo.afterEachError = serializeError(error);
         testError = testError || error;
       }
 
       if (testError) {
+        updateTestInfoAfterAttempt(testInfo, testError, attemptStartedAt);
         throw testError;
       }
 
@@ -346,9 +504,11 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       const smartFailure = createSmartFailure(result.smartReport);
 
       if (smartFailure) {
+        updateTestInfoAfterAttempt(testInfo, smartFailure, attemptStartedAt);
         throw smartFailure;
       }
 
+      updateTestInfoAfterAttempt(testInfo, null, attemptStartedAt);
       result.status = 'passed';
       result.error = null;
       result.diagnostics = null;
@@ -372,6 +532,7 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       await closeOrbit(orbit, result);
       break;
     } catch (error) {
+      updateTestInfoAfterAttempt(testInfo, error, attemptStartedAt);
       result.status = 'failed';
       result.error = serializeError(error);
       result.previousErrors[attempt] = result.error;
@@ -410,9 +571,44 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
   return result;
 }
 
-async function runHooks(hooks, orbit, testInfo, timeoutMs) {
+function createTestInfo({ test, index, attempt, retries, timeout, startedAt, result }) {
+  return {
+    name: test.name,
+    file: test.file,
+    index: index + 1,
+    attempt: attempt + 1,
+    retry: attempt,
+    retries,
+    timeout,
+    status: 'running',
+    phase: 'beforeEach',
+    startedAt: startedAt.toISOString(),
+    endedAt: null,
+    durationMs: 0,
+    error: null,
+    afterEachError: null,
+    artifacts: result.artifacts,
+    result
+  };
+}
+
+function updateTestInfoAfterAttempt(testInfo, error, startedAt) {
+  const endedAt = new Date();
+  testInfo.endedAt = endedAt.toISOString();
+  testInfo.durationMs = endedAt.getTime() - startedAt.getTime();
+  testInfo.status = error ? 'failed' : 'passed';
+  testInfo.error = error ? serializeError(error) : null;
+}
+
+async function runHooks(hooks, orbit, testInfo, timeoutMs, hookName = 'hook') {
   for (const hook of hooks) {
-    await withTimeout(hook(orbit, testInfo), timeoutMs, `Hook timed out after ${timeoutMs}ms`);
+    await withTimeout(hook(orbit, testInfo), timeoutMs, `${hookName} hook timed out after ${timeoutMs}ms`);
+  }
+}
+
+async function runAllHooks(hooks, runInfo, timeoutMs, hookName) {
+  for (const hook of hooks) {
+    await withTimeout(hook(runInfo), timeoutMs, `${hookName} hook timed out after ${timeoutMs}ms`);
   }
 }
 
@@ -457,6 +653,9 @@ function normalizeRunOptions(options, workers) {
     ? 'on'
     : normalizeTraceMode(options.traceMode ?? (options.trace ? 'on' : ci.enabled ? ci.trace : 'off'), 'off');
   const screenshot = normalizeArtifactMode(options.screenshot ?? (ci.enabled ? ci.screenshot : 'on-failure'), 'on-failure');
+  const browserDisplay = step
+    ? 'show'
+    : normalizeBrowserDisplay(options.browserDisplay, ci.enabled ? 'hide' : 'show');
 
   return {
     workers: step ? 1 : workers,
@@ -466,6 +665,7 @@ function normalizeRunOptions(options, workers) {
     trace: traceMode !== 'off',
     traceMode,
     screenshot,
+    browserDisplay,
     smartReport: Boolean(options.smartReport),
     smartReportSlowRequestMs: normalizeInteger(options.smartReportSlowRequestMs, 2000),
     verbose: Boolean(options.verbose),
@@ -537,6 +737,12 @@ function normalizeArtifactMode(value, fallback) {
   const mode = String(value || fallback || 'on-failure').toLowerCase();
 
   return ['off', 'on-failure'].includes(mode) ? mode : fallback;
+}
+
+function normalizeBrowserDisplay(value, fallback = 'show') {
+  const display = String(value || fallback || 'show').toLowerCase();
+
+  return display === 'hide' ? 'hide' : 'show';
 }
 
 function normalizeShard(value) {
@@ -650,6 +856,8 @@ function osWorkerCount() {
 
 function resetTests() {
   tests.length = 0;
+  beforeAllHooks.length = 0;
+  afterAllHooks.length = 0;
   beforeEachHooks.length = 0;
   afterEachHooks.length = 0;
 }
@@ -897,7 +1105,7 @@ function createDebugOptions(runOptions) {
   };
 }
 
-function buildReport({ startedAt, endedAt, results, runId, testFiles, workers, retries, testTimeout, ci, shard, totalDiscoveredTests, selectedTests }) {
+function buildReport({ startedAt, endedAt, results, runId, testFiles, workers, retries, testTimeout, ci, shard, browserDisplay, totalDiscoveredTests, selectedTests }) {
   const stablePassed = results.filter(result => result.status === 'passed').length;
   const flaky = results.filter(result => result.status === 'flaky').length;
   const passed = stablePassed + flaky;
@@ -916,6 +1124,7 @@ function buildReport({ startedAt, endedAt, results, runId, testFiles, workers, r
       workers,
       retries,
       testTimeout,
+      browserDisplay: browserDisplay || 'show',
       ci: ci?.enabled ? {
         enabled: true,
         trace: ci.trace,
@@ -4144,6 +4353,8 @@ function escapeHtml(value) {
 
 module.exports = {
   test,
+  beforeAll,
+  afterAll,
   beforeEach,
   afterEach,
   expect,

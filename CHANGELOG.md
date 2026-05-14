@@ -2,6 +2,27 @@
 
 All notable changes to OrbitTest will be documented in this file.
 
+## Unreleased
+
+No changes yet.
+
+## 3.2.0 - 2026-05-14
+
+- Added browser display control with `--show-browser`, `--hide-browser`, and `browser.display` config using `auto`, `show`, or `hide`.
+- Improved visible browser launches so Studio/local runs open Chrome in a normal maximized foreground window instead of inheriting a minimized Windows process state.
+- Added OrbitTest Studio with `orbittest studio` and `orbittest ui` for a local dashboard, test explorer, run controls, live output, and report center.
+- Improved Studio with OrbitTest logo branding, professional dashboard styling, run presets, command preview, test/report filters, result distribution bars, project metadata, and denser report scanning.
+- Added Studio shutdown cleanup with a `Stop Studio` action, `/api/studio/stop`, socket cleanup, and Ctrl+C/SIGTERM handling so the local port is released cleanly.
+- Added Orbit Intelligence in Studio to analyze recent report history, calculate a health score, detect failure hotspots, recommend the next run target, and apply/run the recommendation.
+- Added visual automation APIs for canvas, WebGL, games, maps, and custom-rendered apps: `orbit.evaluate()`, `orbit.mouse.*`, and `orbit.visual.*`.
+- Added visual assertions and detection helpers including screenshot change detection, pixel checks, color search, color click, and visual stability waits.
+- Added a visual automation regression test and verified the new APIs with a PinThing WebGL/canvas smoke.
+- Started an architecture cleanup freeze by moving project config/test discovery into `core/config.js`, moving project scaffolding into `core/scaffold.js`, moving browser evaluation helpers into `core/browser/evaluation.js`, moving visual/mouse internals into `core/visual/index.js`, adding experimental release flags, adding config regression tests, documenting Stable/Unreleased/Future feature status, and documenting module boundaries in `docs/ARCHITECTURE.md`.
+- Expanded `docs/ARCHITECTURE.md` into a full tool architecture guide covering Orbit Shell, Orbit Core, Mission Control, Capsule, Surface, Locator, Signal, Launchpad, Vision, Reports, Smart Report, Studio, CI, Config, execution flows, target structure, feature map, testing strategy, and release direction.
+- Improved Studio shutdown UX so stopping Studio closes the tab when possible or falls back to a blank page instead of showing a custom shutdown message.
+- Added framework-level lifecycle support with `beforeAll`, `afterAll`, config-driven `globalSetup`, richer `testInfo`, run-level `runInfo`, and lifecycle regression tests.
+- Added `orbit.storage.*` browser state APIs for CDP cookies, `HttpOnly` cookie support, `localStorage`, `sessionStorage`, session-state save/load, privacy-safe session inspection, session health assertions, JWT expiry detection, and storage regression tests.
+
 ## 3.0.0
 
 - Upgraded HTML reports with failure diagnostics, inline failure screenshots, source code frames, smarter failure guidance, and embedded trace timelines when `--trace` is used.

@@ -5,9 +5,26 @@ const Browser = require('./core/browser');
 const { launchChrome, closeChrome } = require('./core/launcher');
 const getWebSocketUrl = require('./core/target');
 const { activateTarget, closeTarget, listPageTargets } = require('./core/target');
-const { afterEach, beforeEach, test, run, expect } = require('./runner/runner');
+const { afterAll, afterEach, beforeAll, beforeEach, test, run, expect } = require('./runner/runner');
 const { describeLocator } = require('./pages/helpers/locators');
+const { dispatchMouseEvent } = require('./pages/helpers/input');
 const { renderReportLogo } = require('./runner/report-logo');
+const {
+  buildEvaluationExpression,
+  deserializeRemoteValue,
+  formatEvaluationError,
+  formatEvaluationLabel
+} = require('./core/browser/evaluation');
+const {
+  clampInteger,
+  createMouseApi,
+  createVisualApi,
+  decodePng,
+  normalizePoint,
+  pickScreenshotOptions,
+  rgbToHex
+} = require('./core/visual');
+const { createStorageApi } = require('./core/storage');
 
 class Orbit {
   constructor(options = {}) {
@@ -21,14 +38,21 @@ class Orbit {
     this.dialogs = createDialogState();
     this.smartReport = createSmartReportState(options.smartReport);
     this.verbose = Boolean(options.verbose);
+    this.browserDisplay = normalizeBrowserDisplay(options.browserDisplay);
     this.defaultActionOptions = {
       actionTimeout: options.actionTimeout || 0,
       log: Boolean(options.verbose)
     };
+    this.mouse = createMouseApi(this);
+    this.visual = createVisualApi(this);
+    this.storage = createStorageApi(this);
   }
 
   async launch() {
-    const { port, launch } = await launchChrome({ log: this.verbose });
+    const { port, launch } = await launchChrome({
+      log: this.verbose,
+      headless: this.browserDisplay === 'hide'
+    });
     this.chromeLaunch = launch;
     this.chromePort = port;
     const wsUrl = await getWebSocketUrl(port);
@@ -37,8 +61,45 @@ class Orbit {
 
     this.browser = new Browser(wsUrl, { log: this.verbose });
     await this.browser.start();
+    await this.prepareVisibleBrowserWindow();
     this.startDialogCapture();
     await this.startSmartReportCapture();
+  }
+
+  async prepareVisibleBrowserWindow() {
+    if (this.browserDisplay !== 'show' || !this.browser?.connection) {
+      return;
+    }
+
+    try {
+      const windowResponse = await this.browser.connection.send('Browser.getWindowForTarget', {
+        targetId: this.currentTargetId
+      }, {
+        timeoutMs: 1000
+      });
+      const windowId = windowResponse.result?.windowId;
+
+      if (windowId !== undefined && windowId !== null) {
+        await this.browser.connection.send('Browser.setWindowBounds', {
+          windowId,
+          bounds: {
+            windowState: 'maximized'
+          }
+        }, {
+          timeoutMs: 1000
+        });
+      }
+    } catch (error) {
+      // Some Chrome builds do not allow window management through CDP.
+    }
+
+    try {
+      await this.browser.connection.send('Page.bringToFront', {}, {
+        timeoutMs: 1000
+      });
+    } catch (error) {
+      // The run can continue even if Windows does not grant focus.
+    }
   }
 
   async open(url, options) {
@@ -153,6 +214,97 @@ class Orbit {
 
       throw error;
     }
+  }
+
+  async evaluate(expressionOrFunction, ...args) {
+    return this.traceStep(`evaluate ${formatEvaluationLabel(expressionOrFunction)}`, () => {
+      return this.evaluateOnPage(expressionOrFunction, args);
+    });
+  }
+
+  async evaluateOnPage(expressionOrFunction, args = [], options = {}) {
+    const connection = this.requireConnection();
+    const expression = buildEvaluationExpression(expressionOrFunction, args);
+    const response = await connection.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true
+    }, {
+      timeoutMs: normalizeTimeoutOption(options, 10000)
+    });
+
+    if (response.result?.exceptionDetails) {
+      throw new Error(formatEvaluationError(response.result.exceptionDetails));
+    }
+
+    return deserializeRemoteValue(response.result?.result);
+  }
+
+  async dispatchVisualMouse(params, options = {}) {
+    const connection = this.requireConnection();
+    const result = await dispatchMouseEvent(connection, params, this.withActionDefaults(options));
+
+    return !result.dialogOpened;
+  }
+
+  async captureVisualFrame(options = {}) {
+    if (options.handleDialogs !== false) {
+      await this.closeBlockingDialogForCapture('visual capture');
+    }
+
+    const screenshotOptions = pickScreenshotOptions(options);
+    const attempts = options.attempts || [
+      { format: 'png', fromSurface: true, captureBeyondViewport: false, ...screenshotOptions },
+      { format: 'png', fromSurface: false, captureBeyondViewport: false, ...screenshotOptions }
+    ];
+    const response = await this.browser.captureScreenshot({
+      timeoutMs: normalizeTimeoutOption(options, 30000),
+      attempts
+    });
+
+    return response.result?.data || '';
+  }
+
+  async readVisualPixel(point, options = {}) {
+    const normalized = normalizePoint(point, options.y);
+    const base64 = await this.captureVisualFrame(options);
+    const image = decodePng(Buffer.from(base64, 'base64'));
+    const dpr = options.devicePixels ? 1 : await this.getDeviceScaleFactor();
+    const x = clampInteger(Math.round(normalized.x * dpr), 0, image.width - 1);
+    const y = clampInteger(Math.round(normalized.y * dpr), 0, image.height - 1);
+    const pixel = image.getPixel(x, y);
+
+    return {
+      x: normalized.x,
+      y: normalized.y,
+      deviceX: x,
+      deviceY: y,
+      r: pixel.r,
+      g: pixel.g,
+      b: pixel.b,
+      a: pixel.a,
+      hex: rgbToHex(pixel.r, pixel.g, pixel.b)
+    };
+  }
+
+  async getDeviceScaleFactor() {
+    try {
+      const value = await this.evaluateOnPage('window.devicePixelRatio || 1', [], { timeout: 1000 });
+      const number = Number(value);
+
+      return Number.isFinite(number) && number > 0 ? number : 1;
+    } catch (error) {
+      return 1;
+    }
+  }
+
+  requireConnection() {
+    if (!this.browser?.connection?.isOpen()) {
+      throw new Error('Browser is not launched or the connection is closed.');
+    }
+
+    return this.browser.connection;
   }
 
   async waitForAlert(options = {}) {
@@ -1430,6 +1582,10 @@ function createDebugState(debug) {
   };
 }
 
+function normalizeBrowserDisplay(value) {
+  return value === 'hide' ? 'hide' : 'show';
+}
+
 function createDialogState() {
   return {
     open: null,
@@ -2347,6 +2503,8 @@ function escapeHtml(value) {
 module.exports = Orbit;
 module.exports.Orbit = Orbit;
 module.exports.test = test;
+module.exports.beforeAll = beforeAll;
+module.exports.afterAll = afterAll;
 module.exports.beforeEach = beforeEach;
 module.exports.afterEach = afterEach;
 module.exports.expect = expect;

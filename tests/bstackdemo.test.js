@@ -1,6 +1,6 @@
 const { test, expect } = require("orbittest");
 
-test("", async (orbit) => {
+test("BrowserStack demo login and add to bag", async (orbit) => {
   await orbit.open("https://bstackdemo.com/signin");
   const url= await orbit.url()
   const title=await orbit.title()

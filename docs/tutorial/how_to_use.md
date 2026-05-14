@@ -2,6 +2,14 @@
 
 This tutorial shows how to install OrbitTest, create a test, use browser actions, use locators, wait for page changes, and read reports.
 
+## Feature Status
+
+- Stable: UI automation, lifecycle hooks, locator engine, reports, CI/CD, Smart Report, Studio/UI, browser display controls, browser storage/session state
+- Experimental: visual automation
+- Future: API automation
+
+OrbitTest is currently in an architecture cleanup freeze. New large features are paused while the existing features are being organized into clearer modules.
+
 ## Requirements
 
 OrbitTest needs:
@@ -101,11 +109,20 @@ module.exports = {
   testDir: "tests",
   testMatch: ["**/*.test.js", "**/*.spec.js"],
   reportsDir: "reports",
+  globalSetup: [],
   workers: 1,
   maxWorkers: 4,
   retries: 0,
   testTimeout: 30000,
   actionTimeout: 0,
+  browser: {
+    display: "auto"
+  },
+  experimental: {
+    studio: true,
+    visualAutomation: true,
+    apiTesting: false
+  },
   openReportOnFailure: {
     enabled: !process.env.CI,
     port: 0
@@ -152,6 +169,72 @@ Use `--verbose` only when you want OrbitTest internal browser/action logs:
 orbittest run tests/login.test.js --verbose
 ```
 
+## OrbitTest Studio
+
+Start the local Studio UI:
+
+```bash
+orbittest studio
+```
+
+This opens a dashboard at a local URL like:
+
+```txt
+http://127.0.0.1:9323/
+```
+
+Studio is useful when you want to run and inspect tests without manually opening report folders:
+
+- See test files and registered test names.
+- Run all tests or one file.
+- Use Local, Evidence, and CI presets.
+- Preview the exact command before launch.
+- Turn on Trace or Smart Report before a run.
+- Run with CI mode or hidden browser mode.
+- Watch live command output.
+- Filter tests and reports.
+- Browse previous HTML, JSON, and JUnit reports.
+- Open failed run artifacts quickly.
+
+Use a custom port:
+
+```bash
+orbittest studio --port 9400
+```
+
+Start Studio without opening the browser automatically:
+
+```bash
+orbittest studio --no-open
+```
+
+Point Studio at a different reports folder:
+
+```bash
+orbittest studio --reports-dir reports/staging
+```
+
+`orbittest ui` is an alias for the same command:
+
+```bash
+orbittest ui
+```
+
+Control whether Chrome is visible:
+
+```bash
+orbittest run --show-browser
+orbittest run --hide-browser
+```
+
+`browser.display` supports:
+
+- `"auto"`: show browser locally, hide browser in CI.
+- `"show"`: always show the browser unless a CLI flag overrides it.
+- `"hide"`: hide the browser unless a CLI flag overrides it.
+
+`--step` always uses a visible browser because live debugging needs something you can watch and control.
+
 ## CI/CD Mode
 
 Use `--ci` when OrbitTest runs inside GitHub Actions, Jenkins, GitLab CI, Azure DevOps, or any other pipeline:
@@ -163,6 +246,7 @@ orbittest run --ci
 CI mode is built for automation:
 
 - It does not open the local failure report server.
+- It hides the browser by default.
 - It prints a CI summary with pass, fail, flaky, skipped, duration, and report paths.
 - It writes `summary.json` for dashboards and custom scripts.
 - It writes `junit.xml` for CI test report publishers.
@@ -307,23 +391,65 @@ test("home page loads", async (orbit) => {
 });
 ```
 
-Use hooks and per-test options when a flow needs setup, cleanup, retries, or a longer timeout:
+Use run-level hooks, test-level hooks, global setup, and per-test options when a flow needs setup, cleanup, retries, or a longer timeout:
 
 ```js
-const { beforeEach, afterEach, test } = require("orbittest");
+const { beforeAll, afterAll, beforeEach, afterEach, test } = require("orbittest");
+
+beforeAll(async (runInfo) => {
+  console.log(`Run started: ${runInfo.runId}`);
+});
+
+beforeEach(async (orbit, testInfo) => {
+  console.log(`Starting ${testInfo.name}, attempt ${testInfo.attempt}`);
+});
+
+afterEach(async (orbit, testInfo) => {
+  console.log(`Finished ${testInfo.name}: ${testInfo.status}`);
+});
+
+afterAll(async (runInfo) => {
+  console.log(`Run finished: ${runInfo.status}`);
+});
+
+test("checkout", { retries: 1, timeout: 30000 }, async (orbit, testInfo) => {
+  await orbit.open("https://example.com/checkout");
+});
+```
+
+For framework-level setup, place hooks in one file and load it from config:
+
+```js
+module.exports = {
+  globalSetup: "tests/setup.js"
+};
+```
+
+`tests/setup.js`:
+
+```js
+const { beforeAll, afterAll, beforeEach, afterEach } = require("orbittest");
+
+beforeAll(async (runInfo) => {
+  console.log(`Starting run ${runInfo.runId}`);
+});
 
 beforeEach(async (orbit, testInfo) => {
   console.log(`Starting ${testInfo.name}`);
 });
 
 afterEach(async (orbit, testInfo) => {
-  console.log(`Finished ${testInfo.name}`);
+  if (testInfo.status === "failed") {
+    await orbit.screenshot(`reports/${testInfo.name}.png`);
+  }
 });
 
-test("checkout", { retries: 1, timeout: 30000 }, async (orbit) => {
-  await orbit.open("https://example.com/checkout");
+afterAll(async (runInfo) => {
+  console.log(`Completed ${runInfo.results.length} results`);
 });
 ```
+
+`testInfo` includes `name`, `file`, `index`, `attempt`, `retry`, `retries`, `timeout`, `status`, `startedAt`, `endedAt`, `durationMs`, `error`, and `artifacts`.
 
 Run it:
 
@@ -386,6 +512,146 @@ Take a screenshot:
 ```js
 await orbit.screenshot("reports/home.png");
 ```
+
+## Automate Canvas, WebGL, And Custom UI
+
+Some apps do not expose normal DOM buttons, links, or text. Games, WebGL demos, maps, charts, and canvas-heavy products often render everything as pixels. Use OrbitTest visual APIs for those cases.
+
+```js
+await orbit.open("https://www.pinthing.com/");
+
+expect(await orbit.exists(orbit.css("canvas"))).toBe(true);
+
+await orbit.evaluate(() => window.stopClock && window.stopClock());
+
+const changed = await orbit.visual.changed(async () => {
+  await orbit.evaluate(() => window.pinthing.down());
+});
+
+expect(changed).toBe(true);
+```
+
+Useful visual actions:
+
+```js
+await orbit.mouse.click(680, 450);
+await orbit.mouse.drag({ x: 680, y: 450 }, { x: 760, y: 360 });
+await orbit.mouse.wheel(0, -500);
+```
+
+Useful visual checks:
+
+```js
+await orbit.visual.waitForStable();
+await orbit.visual.snapshot("reports/canvas-state.png");
+await orbit.visual.expectPixel({ x: 30, y: 30 }, "#ff0000", { tolerance: 5 });
+
+const red = await orbit.visual.findColor("#df1f1f", { tolerance: 70 });
+await orbit.visual.clickColor("#df1f1f", { tolerance: 70 });
+```
+
+## Use Cookies, Local Storage, And Sessions
+
+OrbitTest uses a clean browser profile for each test. When you need authenticated state or app preferences, use `orbit.storage` explicitly.
+
+Set and read cookies:
+
+```js
+await orbit.open("https://example.com");
+
+await orbit.storage.setCookie({
+  name: "session",
+  value: "abc123",
+  httpOnly: true,
+  secure: true
+});
+
+const cookies = await orbit.storage.cookies();
+expect(cookies.some(cookie => cookie.name === "session")).toBe(true);
+```
+
+Set browser storage:
+
+```js
+await orbit.storage.setLocal("token", "local-token");
+await orbit.storage.setSession("view", "compact");
+
+expect(await orbit.storage.getLocal("token")).toBe("local-token");
+expect(await orbit.storage.getSession("view")).toBe("compact");
+```
+
+Save login state after a real login:
+
+```js
+await orbit.open("https://example.com/login");
+await orbit.type("Email", "user@example.com");
+await orbit.type("Password", "secret");
+await orbit.click("Login");
+await orbit.waitForText("Dashboard");
+
+await orbit.storage.saveSession("auth/session.json");
+```
+
+Load it in another test:
+
+```js
+await orbit.open("https://example.com");
+await orbit.storage.loadSession("auth/session.json");
+await orbit.open("https://example.com/dashboard");
+
+expect(await orbit.hasText("Dashboard")).toBe(true);
+```
+
+Useful storage methods:
+
+```js
+await orbit.storage.cookies();
+await orbit.storage.setCookie("theme", "dark");
+await orbit.storage.setCookie({ name: "session", value: "abc123" });
+await orbit.storage.deleteCookie("session");
+await orbit.storage.clearCookies();
+
+await orbit.storage.local();
+await orbit.storage.setLocal("token", "abc123");
+await orbit.storage.getLocal("token");
+await orbit.storage.clearLocal();
+
+await orbit.storage.session();
+await orbit.storage.setSession("view", "compact");
+await orbit.storage.getSession("view");
+await orbit.storage.clearSession();
+
+await orbit.storage.saveSession("auth/session.json");
+await orbit.storage.loadSession("auth/session.json");
+await orbit.storage.clear();
+```
+
+Inspect the current session safely:
+
+```js
+const state = await orbit.storage.inspect();
+
+console.log(state.auth.present);
+console.log(state.auth.signalCount);
+console.log(state.recommendations);
+```
+
+`inspect()` does not print cookie or token values by default. It reports counts, key names, auth-like signals, JWT expiry, and recommendations.
+
+Fail early when a saved login is not healthy:
+
+```js
+await orbit.storage.loadSession("auth/admin-session.json");
+
+await orbit.storage.expectHealthySession({
+  minMinutes: 15,
+  requireCookie: true
+});
+
+await orbit.open("https://example.com/admin");
+```
+
+This gives a direct session-health failure instead of letting the test fail later on a protected page.
 
 ## Handle Alerts, Notifications, And Windows
 
@@ -870,6 +1136,43 @@ npm install -g orbittest
 ```
 
 If you skip the download, make sure Chrome is installed locally or set `ORBITTEST_CHROME_PATH`.
+
+## Browser Display
+
+OrbitTest uses a visible browser locally by default. This is useful when you are writing or debugging tests:
+
+```bash
+orbittest run tests/login.test.js --show-browser
+```
+
+Use hidden browser mode for faster, quieter automation:
+
+```bash
+orbittest run tests/login.test.js --hide-browser
+```
+
+Set the default in `orbittest.config.js`:
+
+```js
+module.exports = {
+  browser: {
+    display: "auto"
+  },
+  experimental: {
+    studio: true,
+    visualAutomation: true,
+    apiTesting: false
+  }
+};
+```
+
+Recommended values:
+
+- `"auto"` for most projects.
+- `"show"` when you want to always watch local runs.
+- `"hide"` when running in an automated environment.
+
+When `--ci` is used, `"auto"` resolves to hidden browser mode. When `--step` is used, OrbitTest forces visible browser mode.
 
 ## Troubleshooting
 

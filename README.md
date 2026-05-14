@@ -54,6 +54,16 @@ await orbit.click("Login");
 
 ---
 
+# 🧭 Feature Status
+
+* Stable: UI automation, lifecycle hooks, locator engine, reports, CI/CD, Smart Report, Studio/UI, browser display controls, browser storage/session state
+* Experimental: visual automation
+* Future: API automation
+
+OrbitTest is currently in an architecture cleanup freeze. New large features are paused while internals are being organized into clearer modules.
+
+---
+
 # 📦 Installation
 
 
@@ -129,23 +139,65 @@ test("Home page loads", async (orbit) => {
 });
 ```
 
-Hooks and per-test options are supported:
+Run-level hooks, test-level hooks, global setup, and per-test options are supported:
 
 ```js
-const { beforeEach, afterEach, test } = require("orbittest");
+const { beforeAll, afterAll, beforeEach, afterEach, test } = require("orbittest");
+
+beforeAll(async (runInfo) => {
+  console.log(`Run started: ${runInfo.runId}`);
+});
+
+beforeEach(async (orbit, testInfo) => {
+  console.log(`Starting ${testInfo.name}, attempt ${testInfo.attempt}`);
+});
+
+afterEach(async (orbit, testInfo) => {
+  console.log(`Finished ${testInfo.name}: ${testInfo.status}`);
+});
+
+afterAll(async (runInfo) => {
+  console.log(`Run finished: ${runInfo.status}`);
+});
+
+test("retry a slow flow", { retries: 1, timeout: 30000 }, async (orbit, testInfo) => {
+  await orbit.open("https://example.com");
+});
+```
+
+Use `globalSetup` when you want shared framework hooks in one file:
+
+```js
+module.exports = {
+  globalSetup: "tests/setup.js"
+};
+```
+
+`tests/setup.js`:
+
+```js
+const { beforeAll, afterAll, beforeEach, afterEach } = require("orbittest");
+
+beforeAll(async (runInfo) => {
+  console.log(`Starting run ${runInfo.runId}`);
+});
 
 beforeEach(async (orbit, testInfo) => {
   console.log(`Starting ${testInfo.name}`);
 });
 
 afterEach(async (orbit, testInfo) => {
-  console.log(`Finished ${testInfo.name}`);
+  if (testInfo.status === "failed") {
+    await orbit.screenshot(`reports/${testInfo.name}.png`);
+  }
 });
 
-test("retry a slow flow", { retries: 1, timeout: 30000 }, async (orbit) => {
-  await orbit.open("https://example.com");
+afterAll(async (runInfo) => {
+  console.log(`Completed ${runInfo.results.length} results`);
 });
 ```
+
+`testInfo` includes `name`, `file`, `index`, `attempt`, `retry`, `retries`, `timeout`, `status`, `startedAt`, `endedAt`, `durationMs`, `error`, and `artifacts`.
 
 ---
 
@@ -160,11 +212,20 @@ module.exports = {
   testDir: "tests",
   testMatch: ["**/*.test.js", "**/*.spec.js"],
   reportsDir: "reports",
+  globalSetup: [],
   workers: 1,
   maxWorkers: 4,
   retries: 0,
   testTimeout: 30000,
   actionTimeout: 0,
+  browser: {
+    display: "auto"
+  },
+  experimental: {
+    studio: true,
+    visualAutomation: true,
+    apiTesting: false
+  },
   openReportOnFailure: {
     enabled: !process.env.CI,
     port: 0
@@ -193,9 +254,50 @@ module.exports = {
 
 CLI flags override config values, for example `orbittest run --workers 2 --retries 1 --timeout 30000 --env staging`.
 
+Browser display defaults to `"auto"`: local runs show the browser, CI runs hide it, and `--step` always uses a visible browser. Override it for one run with:
+
+```bash
+orbittest run --show-browser
+orbittest run --hide-browser
+```
+
 When a run fails locally, OrbitTest starts a small report server on `127.0.0.1`, opens the failed run report in your browser, and auto-stops the server later. Use `--no-open-report-on-failure` to turn it off for one run, or `--report-port 9323` when you want a fixed port.
 
 Test files are run by the CLI, so you do not need `run()` in each test file.
+
+## OrbitTest Studio
+
+Start the local dashboard:
+
+```bash
+orbittest studio
+```
+
+Or use the alias:
+
+```bash
+orbittest ui
+```
+
+Studio opens a local web app for day-to-day test work:
+
+* Run all tests or a single test file
+* Use Local, Evidence, and CI run presets
+* Preview the exact command before launching
+* Toggle trace, Smart Report, CI mode, and hidden browser runs
+* Watch live command output
+* Filter test files and reports
+* Browse previous reports
+* Open HTML, JSON, and JUnit artifacts
+* See failed test messages without digging through folders
+
+Useful options:
+
+```bash
+orbittest studio --port 9323
+orbittest studio --no-open
+orbittest studio --reports-dir reports/staging
+```
 
 ## CI/CD mode
 
@@ -264,6 +366,7 @@ jobs:
         with:
           name: orbittest-report-${{ matrix.artifact }}
           path: reports/
+```
 
 ---
 
@@ -334,6 +437,192 @@ const exists = await orbit.hasText("Welcome");
 
 ```js
 await orbit.screenshot("reports/home.png");
+```
+
+---
+
+# Visual Automation For Canvas, WebGL, And Custom UI
+
+Use visual automation when an app renders pixels instead of normal HTML elements, such as canvas games, WebGL scenes, maps, charts, remote desktops, or custom UI frameworks.
+
+```js
+await orbit.open("https://www.pinthing.com/");
+
+expect(await orbit.exists(orbit.css("canvas"))).toBe(true);
+
+await orbit.evaluate(() => window.pinthing.down());
+
+const changed = await orbit.visual.changed(async () => {
+  await orbit.evaluate(() => window.pinthing.up());
+});
+
+expect(changed).toBe(true);
+```
+
+Coordinate actions:
+
+```js
+await orbit.mouse.click(680, 450);
+await orbit.mouse.drag({ x: 680, y: 450 }, { x: 760, y: 360 });
+await orbit.mouse.wheel(0, -500);
+```
+
+Visual checks:
+
+```js
+await orbit.visual.snapshot("reports/state.png");
+await orbit.visual.expectPixel({ x: 30, y: 30 }, "#ff0000", { tolerance: 5 });
+
+const redObject = await orbit.visual.findColor("#df1f1f", { tolerance: 70 });
+await orbit.visual.clickColor("#df1f1f", { tolerance: 70 });
+```
+
+Useful methods:
+
+```js
+await orbit.evaluate(() => window.app.doSomething());
+await orbit.visual.waitForStable();
+await orbit.visual.changed(async () => {});
+await orbit.visual.expectChanged(async () => {});
+await orbit.visual.findColor("#155eef");
+await orbit.visual.clickColor("#155eef");
+await orbit.visual.pixel({ x: 100, y: 100 });
+```
+
+---
+
+# Browser Storage And Sessions
+
+OrbitTest starts each test with a clean browser profile by default. Use `orbit.storage` when a test needs explicit cookies, `localStorage`, `sessionStorage`, or a saved login state.
+
+## Cookies
+
+```js
+await orbit.open("https://example.com");
+
+await orbit.storage.setCookie({
+  name: "session",
+  value: "abc123",
+  httpOnly: true,
+  secure: true
+});
+
+const cookies = await orbit.storage.cookies();
+console.log(cookies);
+
+await orbit.storage.deleteCookie("session");
+await orbit.storage.clearCookies();
+```
+
+You can also pass a name/value pair:
+
+```js
+await orbit.storage.setCookie("theme", "dark");
+```
+
+## Local and session storage
+
+```js
+await orbit.storage.setLocal("token", "local-token");
+expect(await orbit.storage.getLocal("token")).toBe("local-token");
+
+await orbit.storage.setSession("view", "compact");
+expect(await orbit.storage.getSession("view")).toBe("compact");
+
+const local = await orbit.storage.local();
+const session = await orbit.storage.session();
+
+await orbit.storage.removeLocal("token");
+await orbit.storage.clearSession();
+```
+
+Storage values follow browser behavior, so values are stored as strings.
+
+## Save and load login state
+
+Use `saveSession()` after login, then `loadSession()` in later tests.
+
+```js
+await orbit.open("https://example.com/login");
+await orbit.type("Email", "user@example.com");
+await orbit.type("Password", "secret");
+await orbit.click("Login");
+await orbit.waitForText("Dashboard");
+
+await orbit.storage.saveSession("auth/session.json");
+```
+
+Reuse it:
+
+```js
+await orbit.open("https://example.com");
+await orbit.storage.loadSession("auth/session.json");
+await orbit.open("https://example.com/dashboard");
+
+expect(await orbit.hasText("Dashboard")).toBe(true);
+```
+
+`saveSession()` stores cookies, current-origin `localStorage`, and current-origin `sessionStorage`. Cookies are applied through Chrome DevTools Protocol, so `HttpOnly` cookies are supported.
+
+## Storage Intelligence
+
+Use `inspect()` when you want a safe summary of the current browser state without printing secrets:
+
+```js
+const state = await orbit.storage.inspect();
+
+console.log(state.auth.present);
+console.log(state.auth.signalCount);
+console.log(state.cookies.authLikeCount);
+console.log(state.recommendations);
+```
+
+`inspect()` redacts cookie and storage values by default, detects auth-like keys such as `session`, `token`, `accessToken`, and `refreshToken`, and understands JWT expiry when a token is present.
+
+Use `expectHealthySession()` to fail early when a saved login is missing, expired, or about to expire:
+
+```js
+await orbit.storage.loadSession("auth/admin-session.json");
+
+await orbit.storage.expectHealthySession({
+  minMinutes: 15,
+  requireCookie: true
+});
+
+await orbit.open("https://example.com/admin");
+```
+
+This is useful in CI because the test fails with a direct session-health message instead of failing later on a random protected page.
+
+Useful methods:
+
+```js
+await orbit.storage.cookies();
+await orbit.storage.setCookie({ name: "session", value: "abc123" });
+await orbit.storage.setCookies([{ name: "a", value: "1" }]);
+await orbit.storage.deleteCookie("session");
+await orbit.storage.clearCookies();
+
+await orbit.storage.local();
+await orbit.storage.getLocal("token");
+await orbit.storage.setLocal("token", "abc123");
+await orbit.storage.removeLocal("token");
+await orbit.storage.clearLocal();
+
+await orbit.storage.session();
+await orbit.storage.getSession("view");
+await orbit.storage.setSession("view", "compact");
+await orbit.storage.removeSession("view");
+await orbit.storage.clearSession();
+
+await orbit.storage.saveSession("auth/session.json");
+await orbit.storage.loadSession("auth/session.json");
+await orbit.storage.clear();
+
+await orbit.storage.inspect();
+await orbit.storage.health();
+await orbit.storage.expectHealthySession();
+await orbit.storage.expectSession();
 ```
 
 ---
@@ -901,14 +1190,31 @@ orbittest run --ci --fail-fast
 orbittest run --ci --max-failures 3
 ```
 
+Control browser display:
+
+```bash
+orbittest run --show-browser
+orbittest run --hide-browser
+```
+
+Open Studio:
+
+```bash
+orbittest studio
+orbittest ui --no-open
+```
+
 ---
 
 # 🌍 Browser Behavior
 
 * Fresh browser per test
-* No cookies or cache
+* No cookies or cache by default
 * No extensions
 * Fully isolated environment
+* Local runs show the browser by default
+* CI runs hide the browser by default
+* Cookies and browser storage can be restored explicitly with `orbit.storage`
 
 ---
 
@@ -932,8 +1238,8 @@ orbittest run
 
 * Smart element detection
 * Improved wait system
-* Headless mode
-* CI integrations
+* Smart browser display profiles
+* Richer CI integrations
 
 ---
 
