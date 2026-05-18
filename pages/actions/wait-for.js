@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 const exists = require("./exists");
 const { executeAction } = require("../helpers/execution");
 const { describeLocator } = require("../helpers/locators");

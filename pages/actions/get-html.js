@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 async function getHTML(connection) {
   const response = await connection.send("DOM.getDocument");
 

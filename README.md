@@ -9,6 +9,14 @@ OrbitTest is a lightweight end-to-end testing tool that lets you write tests usi
 
 ---
 
+# Official Project
+
+OrbitTest is created and maintained by Abhay. Forks and modified versions are welcome under the Apache License, Version 2.0, but they must preserve copyright, license, and notice attribution and must not imply they are the official OrbitTest project.
+
+The OrbitTest name, logo, and branding are covered by the project trademark policy. See [TRADEMARKS.md](TRADEMARKS.md).
+
+---
+
 # ⚡ Quick Example
 
 ```js
@@ -1262,6 +1270,8 @@ Contributions are welcome.
 # 📄 License
 
 Apache-2.0
+
+Copyright 2026 Abhay. See [LICENSE](LICENSE), [NOTICE](NOTICE), and [TRADEMARKS.md](TRADEMARKS.md).
 
 ## Keywords
 

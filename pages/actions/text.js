@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 const { executeAction } = require("../helpers/execution");
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");

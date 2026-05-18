@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 const Connection = require('./connection');
 const Page = require('../pages/page');
 const fs = require('fs');

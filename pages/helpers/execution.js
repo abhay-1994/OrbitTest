@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 async function executeAction(name, options, fn) {
   const settings = normalizeExecutionOptions(options);
   const startedAt = Date.now();

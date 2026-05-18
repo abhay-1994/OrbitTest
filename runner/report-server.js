@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 
 const fs = require('fs');
 const http = require('http');

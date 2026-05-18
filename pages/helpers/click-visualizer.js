@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 async function showClickPoint(connection, x, y, options = {}) {
   if (options.visualize === false || options.showClickPoint === false) {
     return;

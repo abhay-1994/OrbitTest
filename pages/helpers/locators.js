@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 function buildLocatorExpression(target, action) {
   const locator = normalizeLocator(target);
 

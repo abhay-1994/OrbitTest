@@ -1,3 +1,6 @@
+// Copyright 2026 Abhay
+// Licensed under the Apache License, Version 2.0.
+
 const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
