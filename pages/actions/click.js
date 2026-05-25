@@ -4,7 +4,8 @@
 const findClickablePoint = require("./find-clickable-point");
 const { executeAction } = require("../helpers/execution");
 const { showClickPoint } = require("../helpers/click-visualizer");
-const { describeLocator } = require("../helpers/locators");
+const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { dispatchMouseEvent } = require("../helpers/input");
 const { delay, normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
@@ -30,6 +31,12 @@ async function click(connection, target, options = {}) {
     logAction(options, "Clicking at:", x, y);
 
     await showClickPoint(connection, x, y, options);
+
+    if (options.contextId) {
+      await clickElementInFrame(connection, target, options);
+      await navigationWatcher.wait();
+      return;
+    }
 
     if ((await dispatchMouseEvent(connection, {
       type: "mouseMoved",
@@ -59,6 +66,23 @@ async function click(connection, target, options = {}) {
 
     await navigationWatcher.wait();
   });
+}
+
+async function clickElementInFrame(connection, target, options = {}) {
+  const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+    buildLocatorExpression(target, "clickElement"),
+    options
+  ), {
+    timeoutMs: normalizeInteger(options.inputCommandTimeout ?? options.inputCommandTimeoutMs, 10000)
+  });
+
+  if (response.result?.exceptionDetails) {
+    throw new Error(response.result.exceptionDetails.text || `Could not click ${describeLocator(target)} inside frame`);
+  }
+
+  if (!response.result?.result?.value) {
+    throw new Error(`No clickable element found for ${describeLocator(target)} inside frame`);
+  }
 }
 
 function createNavigationWatcher(connection, options = {}) {
@@ -94,7 +118,7 @@ function createNavigationWatcher(connection, options = {}) {
         return false;
       }
 
-      await waitForDocumentReady(connection, loadTimeout);
+      await waitForDocumentReady(connection, loadTimeout, options);
       return true;
     }
   };
@@ -110,16 +134,16 @@ function shouldWaitForNavigation(options = {}) {
   ) && !options.noWaitAfter;
 }
 
-async function waitForDocumentReady(connection, timeoutMs) {
+async function waitForDocumentReady(connection, timeoutMs, options = {}) {
   const startedAt = Date.now();
   let stableCompleteCount = 0;
 
   while (Date.now() - startedAt <= timeoutMs) {
     try {
-      const response = await connection.send("Runtime.evaluate", {
-        expression: "document.readyState",
-        returnByValue: true
-      }, {
+      const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+        "document.readyState",
+        { contextId: options.contextId }
+      ), {
         timeoutMs: Math.min(3000, Math.max(1, timeoutMs))
       });
 

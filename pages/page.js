@@ -21,8 +21,8 @@ class Page {
     this.connection = connection;
   }
 
-  async getHTML() {
-    return getHTML(this.connection);
+  async getHTML(options = {}) {
+    return getHTML(this.connection, options);
   }
 
   async click(target, options = {}) {
@@ -69,12 +69,20 @@ class Page {
     return text(this.connection, target, options);
   }
 
-  async findClickablePoint(target) {
-    return findClickablePoint(this.connection, target);
+  async visibleText(target, options = {}) {
+    return text.visibleText(this.connection, target, options);
   }
 
-  async focusInput(target) {
-    return focusInput(this.connection, target);
+  async domText(target, options = {}) {
+    return text.domText(this.connection, target, options);
+  }
+
+  async findClickablePoint(target, options = {}) {
+    return findClickablePoint(this.connection, target, options);
+  }
+
+  async focusInput(target, options = {}) {
+    return focusInput(this.connection, target, options);
   }
 }
 

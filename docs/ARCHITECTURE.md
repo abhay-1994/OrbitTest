@@ -42,6 +42,8 @@ This is a strong product direction, but each feature needs a clear internal home
 | --- | --- | --- |
 | UI automation | Stable | Core OrbitTest identity |
 | Locator engine | Stable | CSS, XPath, role, attribute, text, all-elements support |
+| Frame automation | Stable | Scoped iframe and nested iframe actions |
+| Shadow automation | Stable | Scoped open, closed, and nested shadow root actions |
 | Reports | Stable | HTML, JSON, summary, JUnit, traces |
 | CI/CD | Stable | CI mode, sharding, retries, fail-fast, GitHub annotations |
 | Smart Report | Stable | Browser evidence and failure diagnosis |
@@ -137,6 +139,7 @@ Orbit Core is the user-facing JavaScript entry point.
 Current files:
 
 - `orbit.js`
+- `core/orbit.js`
 - `runner/runner.js` exports for `test`, `expect`, `beforeAll`, `afterAll`, `beforeEach`, `afterEach`, and `run`
 
 It is responsible for:
@@ -519,6 +522,8 @@ Orbit Reports turns test results into human-readable and machine-readable artifa
 Current files:
 
 - `runner/runner.js`
+- `core/reports/json.js`
+- `core/reports/junit.js`
 - `runner/report-logo.js`
 - `runner/report-server.js`
 
@@ -727,6 +732,33 @@ module.exports = {
 };
 ```
 
+## Current Module Map
+
+| Area | Files | Responsibility |
+| --- | --- | --- |
+| CLI shell | `cli.js` | Parse commands, print help, call core modules |
+| Project config | `core/config.js` | Load/normalize config, resolve options, discover tests |
+| Project scaffold | `core/scaffold.js` | Create starter config, starter test, package script, `.gitignore` entry |
+| Browser evaluation | `core/browser/evaluation.js` | Build evaluation expressions and decode CDP return values |
+| Browser dialogs | `core/browser/dialogs.js` | Dialog state factory, dialog serializers |
+| Browser windows | `core/browser/windows.js` | Multi-tab target resolution and matching utilities |
+| Browser smart-report | `core/browser/smart-report.js` | Smart report state factory, network capture helpers |
+| Browser launch | `core/launcher.js`, `core/target.js` | Start Chrome, manage targets, close Chrome |
+| CDP connection | `core/connection.js`, `core/browser.js` | Send/receive Chrome DevTools Protocol messages |
+| Visual engine | `core/visual/index.js` | Mouse coordinates, screenshots, pixels, color search, visual waits |
+| Storage engine | `core/storage/index.js` | Cookies, localStorage, sessionStorage, session-state save/load |
+| Normalization | `core/normalize.js` | Shared input/option normalization functions |
+| Page actions | `pages/actions/*`, `pages/helpers/*` | Locators, clicks, typing, waits, text extraction |
+| Frame automation | `core/frames.js`, `pages/helpers/runtime.js` | iFrame context, frame path resolution |
+| Shadow automation | `core/shadow.js` | Shadow DOM context, shadow path resolution |
+| Runner | `runner/runner.js` | Test registration, execution, retries, CI mode, results |
+| Failure diagnostics | `runner/failure-diagnostics.js` | Failure insight generation, smart report analysis |
+| Report cleanup | `runner/report-cleanup.js` | Report retention policy, old run deletion |
+| CI annotations | `runner/ci-annotations.js` | GitHub annotation output for failed/flaky tests |
+| Reports | `core/reports/html.js`, `core/reports/json.js`, `core/reports/junit.js`, `core/reports/trace.js` | HTML/JSON/JUnit/trace report rendering |
+| Studio | `runner/studio-server.js` | Local dashboard, run controls, report center |
+| Public API | `orbit.js` | `Orbit` object and exported test APIs |
+
 ## Target Structure
 
 OrbitTest should gradually move toward this structure:
@@ -734,39 +766,33 @@ OrbitTest should gradually move toward this structure:
 ```txt
 core/
   browser/
-    evaluation.js
-    dialogs.js
-    windows.js
-    permissions.js
-    smart-report.js
+    evaluation.js      ✓ done
+    dialogs.js         ✓ done
+    windows.js         ✓ done
+    smart-report.js    ✓ done
+    permissions.js     next: extract from orbit.js
   locator/
-    index.js
+    index.js           next: move from pages/helpers/locators.js
     diagnostics.js
-  actions/
-    click.js
-    type.js
-    wait.js
-    text.js
-  assertions/
-    index.js
   visual/
-    index.js
-    pixels.js
-    png.js
-  api/
-    README.md       reserved for future API automation
-  runner/
-    scheduler.js
-    lifecycle.js
-    retries.js
+    index.js           ✓ done
+  storage/
+    index.js           ✓ done
   reports/
-    html.js
-    json.js
-    junit.js
-    cleanup.js
-  studio/
-    server.js
-    ui.js
+    html.js            ✓ done
+    json.js            ✓ done
+    junit.js           ✓ done
+    trace.js           ✓ done
+    cleanup.js         ✓ done (as runner/report-cleanup.js)
+  api/
+    README.md          reserved for future API automation
+
+runner/
+  runner.js            ✓ trimmed
+  failure-diagnostics.js  ✓ done
+  report-cleanup.js    ✓ done
+  ci-annotations.js    ✓ done
+  studio-server.js     next: split into studio/server.js + studio/sse.js
 ```
 
 Do not move everything at once. Move one boundary at a time and run smoke tests after each move.
@@ -785,7 +811,7 @@ Do not move everything at once. Move one boundary at a time and run smoke tests 
 | Storage engine | `core/storage/index.js` | Cookies, localStorage, sessionStorage, session-state save/load |
 | Page actions | `pages/actions/*`, `pages/helpers/*` | Locators, clicks, typing, waits, text extraction |
 | Runner | `runner/runner.js` | Test registration, execution, retries, CI mode, reports |
-| Reports | `runner/runner.js`, `runner/report-server.js`, `runner/report-logo.js` | HTML/JSON/JUnit/summary reports and local report serving |
+| Reports | `runner/runner.js`, `core/reports/*`, `runner/report-server.js`, `runner/report-logo.js` | HTML/JSON/JUnit/summary reports and local report serving |
 | Studio | `runner/studio-server.js` | Local dashboard, run controls, report center, Orbit Intelligence |
 | Public API | `orbit.js` | `Orbit` object and exported test APIs |
 
@@ -795,6 +821,8 @@ Do not move everything at once. Move one boundary at a time and run smoke tests 
 | --- | --- | --- | --- | --- | --- |
 | UI automation | Stable | `orbit.open()`, `orbit.click()`, `orbit.type()`, `orbit.exists()` | `orbit.js`, `pages/actions/*`, `pages/helpers/*` | `tests/example.test.js`, `tests/sample.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Locator engine | Stable | `orbit.css()`, `orbit.xpath()`, `orbit.getByRole()`, `orbit.getByAttribute()`, `orbit.all()` | `pages/helpers/locators.js`, `pages/actions/all.js` | `tests/sample.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
+| Frame automation | Stable | `orbit.frame()`, `orbit.withFrame()`, `frame.frame()` | `core/frames.js`, `pages/actions/*`, `pages/helpers/runtime.js` | `tests/frame.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
+| Shadow automation | Stable | `orbit.shadow()`, `orbit.withShadow()`, `shadow.shadow()` | `core/shadow.js` | `tests/shadow.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Visual automation | Experimental | `orbit.evaluate()`, `orbit.mouse.*`, `orbit.visual.*` | `core/browser/evaluation.js`, `core/visual/index.js`, `orbit.js` | `tests/visual-features.test.js`, `tests/pinthing.visual.test.js` | `README.md`, `VISUAL_AUTOMATION_APIS.txt` |
 | Browser storage/session state | Stable | `orbit.storage.*` | `core/storage/index.js`, `orbit.js` | `tests/storage.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Reports | Stable | `orbittest run`, `--trace`, `--smart-report` | `runner/runner.js`, `runner/report-logo.js`, `runner/report-server.js` | `tests/example.test.js`, `tests/sample.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
@@ -821,6 +849,10 @@ await orbit.all(locator);
 await orbit.url();
 await orbit.title();
 await orbit.pageState();
+await orbit.frame(locatorOrPath);
+await orbit.withFrame(locatorOrPath, async (frame) => {});
+await orbit.shadow(locatorOrPath);
+await orbit.withShadow(locatorOrPath, async (shadow) => {});
 ```
 
 Stable lifecycle APIs:
@@ -1021,17 +1053,25 @@ These are architecture tasks, not new features:
 - Done: move project scaffolding into `core/scaffold.js`
 - Done: move browser evaluation helpers into `core/browser/evaluation.js`
 - Done: move visual/mouse internals into `core/visual/index.js`
-- Next: move dialog helpers from `orbit.js` into `core/browser/dialogs.js`
-- Next: move window/tab helpers from `orbit.js` into `core/browser/windows.js`
+- Done: move dialog state and serializers into `core/browser/dialogs.js`
+- Done: move window/tab target utilities into `core/browser/windows.js`
+- Done: move smart report state and helpers into `core/browser/smart-report.js`
+- Done: move normalization functions into `core/normalize.js`
+- Done: move JSON summary rendering into `core/reports/json.js`
+- Done: move JUnit rendering into `core/reports/junit.js`
+- Done: move HTML report rendering into `core/reports/html.js`
+- Done: move trace HTML rendering into `core/reports/trace.js`
+- Done: move failure diagnostics into `runner/failure-diagnostics.js`
+- Done: move report cleanup into `runner/report-cleanup.js`
+- Done: move CI annotations into `runner/ci-annotations.js`
 - Next: move notification permission helpers into `core/browser/permissions.js`
-- Next: move HTML report rendering into `core/reports/html.js`
-- Next: move JUnit rendering into `core/reports/junit.js`
-- Next: move report cleanup into `core/reports/cleanup.js`
-- Later: move locator engine into `core/locator/*`
+- Next: move locator engine into `core/locator/index.js`
+- Later: split `runner/studio-server.js` into `studio/server.js` + `studio/sse.js`
 
 ## Suggested Release Path
 
 ```txt
+3.3.0 = Forge + frame/shadow automation + TypeScript definitions + Studio live frames + architecture split
 3.2.0 = Studio + Visual Automation + browser display controls + architecture cleanup + storage/session intelligence
 3.x = Continued architecture cleanup + stability
 4.0.0 = API automation

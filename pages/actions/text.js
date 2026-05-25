@@ -3,20 +3,41 @@
 
 const { executeAction } = require("../helpers/execution");
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");
 
-async function text(connection, target, options = {}) {
-  return executeAction(`text ${describeLocator(target)}`, options, async () => {
+const TEXT_ACTIONS = {
+  text: {
+    action: "text",
+    label: "text",
+    missingMessage: "No visible element found"
+  },
+  visibleText: {
+    action: "visibleText",
+    label: "visibleText",
+    missingMessage: "No visible element found"
+  },
+  domText: {
+    action: "domText",
+    label: "domText",
+    missingMessage: "No element found"
+  }
+};
+
+async function readText(connection, target, options = {}, mode = "text") {
+  const config = TEXT_ACTIONS[mode] || TEXT_ACTIONS.text;
+
+  return executeAction(`${config.label} ${describeLocator(target)}`, options, async () => {
     const waitOptions = normalizeTextWaitOptions(options);
     const startedAt = Date.now();
     let lastError = null;
 
     while (true) {
       try {
-        const response = await connection.send("Runtime.evaluate", {
-          expression: buildLocatorExpression(target, "text"),
-          returnByValue: true
-        }, {
+        const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+          buildLocatorExpression(target, config.action),
+          options
+        ), {
           timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
         });
 
@@ -46,11 +67,25 @@ async function text(connection, target, options = {}) {
       throw lastError;
     }
 
-    throw new Error(`No visible element found for ${describeLocator(target)} after ${waitOptions.timeout}ms`);
+    throw new Error(`${config.missingMessage} for ${describeLocator(target)} after ${waitOptions.timeout}ms`);
   });
 }
 
+async function text(connection, target, options = {}) {
+  return readText(connection, target, options, "text");
+}
+
+async function visibleText(connection, target, options = {}) {
+  return readText(connection, target, options, "visibleText");
+}
+
+async function domText(connection, target, options = {}) {
+  return readText(connection, target, options, "domText");
+}
+
 module.exports = text;
+module.exports.visibleText = visibleText;
+module.exports.domText = domText;
 
 function normalizeTextWaitOptions(options = {}) {
   if (typeof options === "number") {

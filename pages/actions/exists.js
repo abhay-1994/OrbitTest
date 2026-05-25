@@ -3,6 +3,7 @@
 
 const { executeAction } = require("../helpers/execution");
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");
 
 async function exists(connection, target, options = {}) {
@@ -19,10 +20,10 @@ async function waitForVisible(connection, target, options) {
 
   while (true) {
     try {
-      const response = await connection.send("Runtime.evaluate", {
-        expression: buildLocatorExpression(target, "exists"),
-        returnByValue: true
-      }, {
+      const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+        buildLocatorExpression(target, "exists"),
+        options
+      ), {
         timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
       });
 
@@ -64,6 +65,7 @@ function normalizeCheckWaitOptions(options = {}) {
   });
 
   return {
+    ...options,
     ...waitOptions,
     locatorTimeout: options.locatorTimeout,
     locatorTimeoutMs: options.locatorTimeoutMs

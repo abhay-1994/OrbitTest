@@ -4,6 +4,7 @@
 const focusInput = require("./focus-input");
 const { executeAction } = require("../helpers/execution");
 const { describeLocator } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { normalizeWaitOptions, waitUntil } = require("../helpers/wait");
 
 async function type(connection, target, value, options = {}) {
@@ -25,7 +26,7 @@ async function type(connection, target, value, options = {}) {
     }
 
     await typeLikeKeyboard(connection, value, options);
-    await syncActiveInputValue(connection, value);
+    await syncActiveInputValue(connection, value, options);
   });
 }
 
@@ -45,7 +46,7 @@ async function typeLikeKeyboard(connection, value, options = {}) {
   }
 }
 
-async function syncActiveInputValue(connection, value) {
+async function syncActiveInputValue(connection, value, options = {}) {
   const expression = `(() => {
     const element = document.activeElement;
     const value = ${JSON.stringify(String(value))};
@@ -87,10 +88,7 @@ async function syncActiveInputValue(connection, value) {
     return { synced: true, value: element.value };
   })()`;
 
-  await connection.send("Runtime.evaluate", {
-    expression,
-    returnByValue: true
-  });
+  await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(expression, options));
 }
 
 function normalizeDelay(value) {

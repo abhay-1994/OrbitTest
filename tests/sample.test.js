@@ -150,3 +150,21 @@ test("Prefer the most actionable visible text match", async (orbit) => {
   expect(await orbit.text(orbit.css("#save"))).toBe("Save");
   expect(await orbit.text(orbit.nth(orbit.css("button"), 1))).toBe("Cancel");
 });
+
+test("Read visible text and DOM text separately", async (orbit) => {
+  const html = `
+    <main>
+      <button id="save">Save <span hidden>Internal note</span></button>
+      <p id="hidden-message" hidden>Hidden token</p>
+      <p id="display-none" style="display: none">Display none token</p>
+    </main>
+  `;
+
+  await orbit.open(`data:text/html,${encodeURIComponent(html)}`);
+
+  expect(await orbit.visibleText(orbit.css("#save"))).toBe("Save");
+  expect(await orbit.domText(orbit.css("#save"))).toBe("Save Internal note");
+  expect(await orbit.domText(orbit.css("#hidden-message"))).toBe("Hidden token");
+  expect(await orbit.domText(orbit.css("#display-none"))).toBe("Display none token");
+  expect(await orbit.domText("Hidden token")).toBe("Hidden token");
+});

@@ -1,6 +1,6 @@
 node_modules/
 dist/
-reports/
+/reports/
 chrome-profile/
 tmp-profile-*/
 npm-debug.log*

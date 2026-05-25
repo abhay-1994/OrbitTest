@@ -3,6 +3,7 @@
 
 const { executeAction } = require("../helpers/execution");
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");
 
 async function all(connection, target, options = {}) {
@@ -13,10 +14,10 @@ async function all(connection, target, options = {}) {
 
     while (true) {
       try {
-        const response = await connection.send("Runtime.evaluate", {
-          expression: buildLocatorExpression(target, "all"),
-          returnByValue: true
-        }, {
+        const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+          buildLocatorExpression(target, "all"),
+          options
+        ), {
           timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
         });
 

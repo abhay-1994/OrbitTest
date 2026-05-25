@@ -705,6 +705,66 @@ await orbit.closeWindow(popup.id);
 
 `switchToWindow()` and `closeWindow()` accept an index, target id, URL/title text, regular expression, or predicate. `newWindow(url)` opens a new tab and switches to it unless you pass `{ switchTo: false }`.
 
+## Work Inside Frames
+
+Use `orbit.frame()` when a form, button, or widget lives inside an iframe:
+
+```js
+const billing = await orbit.frame(orbit.getByAttribute("title", "Billing"));
+
+await billing.type("Email", "team@example.test");
+await billing.click("Save billing");
+expect(await billing.exists("Saved")).toBe(true);
+```
+
+For nested frames, either chain frame scopes:
+
+```js
+const checkout = await orbit.frame(orbit.getByAttribute("title", "Checkout"));
+const vault = await checkout.frame(orbit.getByAttribute("title", "Vault"));
+
+await vault.click("Approve");
+```
+
+Or pass the frame path in one call:
+
+```js
+const vault = await orbit.frame([
+  orbit.getByAttribute("title", "Checkout"),
+  orbit.getByAttribute("title", "Vault")
+]);
+```
+
+## Work Inside Shadow Roots
+
+Use `orbit.shadow()` for web components. The same scoped actions work for open and closed shadow roots:
+
+```js
+const profile = await orbit.shadow(orbit.css("user-profile"));
+
+await profile.type("Email", "team@example.test");
+await profile.click("Save");
+expect(await profile.text(orbit.css("#status"))).toBe("Saved");
+```
+
+Nested shadow roots can be chained:
+
+```js
+const shell = await orbit.shadow(orbit.css("app-shell"));
+const panel = await shell.shadow(orbit.css("settings-panel"));
+
+await panel.click("Enable");
+```
+
+Or resolved as a path:
+
+```js
+const panel = await orbit.shadow([
+  orbit.css("app-shell"),
+  orbit.css("settings-panel")
+]);
+```
+
 ## Use Locators
 
 Text actions are simple, but OrbitTest also supports explicit locators.

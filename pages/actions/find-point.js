@@ -2,12 +2,13 @@
 // Licensed under the Apache License, Version 2.0.
 
 const { buildLocatorExpression, describeLocator } = require("../helpers/locators");
+const { applyPointOffset, buildRuntimeEvaluateParams } = require("../helpers/runtime");
 
 async function findPoint(connection, target, options = {}) {
-  const response = await connection.send("Runtime.evaluate", {
-    expression: buildLocatorExpression(target, "point"),
-    returnByValue: true
-  }, {
+  const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+    buildLocatorExpression(target, "point"),
+    options
+  ), {
     timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
   });
 
@@ -21,7 +22,7 @@ async function findPoint(connection, target, options = {}) {
     throw new Error(`No visible element found for ${describeLocator(target)}`);
   }
 
-  return value;
+  return applyPointOffset(value, options);
 }
 
 module.exports = findPoint;

@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0.
 
 const { executeAction } = require("../helpers/execution");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 const { delay, normalizeWaitOptions } = require("../helpers/wait");
 
 async function hasText(connection, text, options = {}) {
@@ -19,10 +20,10 @@ async function waitForText(connection, text, options) {
 
   while (true) {
     try {
-      const response = await connection.send("Runtime.evaluate", {
-        expression: `document.body && document.body.innerText.toLowerCase().includes(${JSON.stringify(targetText)})`,
-        returnByValue: true
-      });
+      const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+        `document.body && document.body.innerText.toLowerCase().includes(${JSON.stringify(targetText)})`,
+        options
+      ));
 
       if (response.result?.exceptionDetails) {
         throw new Error(response.result.exceptionDetails.text || `Could not check text "${text}"`);
@@ -56,10 +57,15 @@ function normalizeCheckWaitOptions(options = {}) {
     return normalizeWaitOptions(options);
   }
 
-  return normalizeWaitOptions({
+  const waitOptions = normalizeWaitOptions({
     ...options,
     timeout: options.timeout ?? options.timeoutMs ?? 5000
   });
+
+  return {
+    ...options,
+    ...waitOptions
+  };
 }
 
 module.exports = hasText;

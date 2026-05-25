@@ -6,6 +6,18 @@ All notable changes to OrbitTest will be documented in this file.
 
 No changes yet.
 
+## 3.3.0 - 2026-05-25
+
+- Added OrbitTest Forge with `orbittest forge`, a separate recorder panel, live script preview, Copy Script, Verify Next Click, and optional `--output` export.
+- Added scoped iframe automation with `orbit.frame()`, `orbit.withFrame()`, nested frame resolution, and frame regression tests.
+- Added open, closed, and nested shadow root automation with `orbit.shadow()`, `orbit.withShadow()`, scoped actions, evaluation, and shadow regression tests.
+- Improved the locator engine with contextual `near()` / `within()` matching, `nth()` helpers, pseudo-content text support, ancestor opacity visibility checks, better accessible-name ranking, and `visibleText()` / `domText()` readers.
+- Refactored Orbit internals into focused modules for core orchestration, normalization, dialogs, windows, Smart Report state, report rendering, report cleanup, CI annotations, frames, shadow roots, and Forge.
+- Improved Studio with live server-sent run events, per-step frame capture/player support, safer hidden worker browser launches, and dashboard smoke coverage.
+- Added TypeScript declarations through `index.d.ts`, package `types`, typed exports, and TypeScript as a development dependency.
+- Kept external demo/playground smoke tests out of default execution so release checks can stay deterministic.
+- Expanded README, tutorial, and architecture documentation for Forge, frames, shadow DOM, Studio, TypeScript, report cleanup, and the updated module map.
+
 ## 3.2.0 - 2026-05-14
 
 - Added browser display control with `--show-browser`, `--hide-browser`, and `browser.display` config using `auto`, `show`, or `hide`.

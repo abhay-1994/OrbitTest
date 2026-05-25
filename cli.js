@@ -65,6 +65,11 @@ async function main() {
     return;
   }
 
+  if (command === "forge") {
+    await forgeCommand(args.slice(1));
+    return;
+  }
+
   if (command === "clean-reports") {
     cleanReportsCommand(args.slice(1));
     return;
@@ -209,6 +214,26 @@ async function runTests(args) {
     openReportOnFailure: mergeOpenReportOnFailureOptions(config.openReportOnFailure, runArgs, ciOptions),
     reportRetention: config.reportRetention,
     ci: ciOptions
+  });
+}
+
+async function forgeCommand(args) {
+  if (args.includes("-h") || args.includes("--help")) {
+    printForgeHelp();
+    return;
+  }
+
+  const forgeArgs = parseForgeArgs(args);
+  validateForgeArgs(forgeArgs);
+
+  const { runForge } = require("./core/forge");
+  await runForge({
+    url: forgeArgs.url,
+    output: forgeArgs.output,
+    testName: forgeArgs.name,
+    navigationTimeout: forgeArgs.navigationTimeout,
+    cwd: process.cwd(),
+    logger: console
   });
 }
 
@@ -695,6 +720,81 @@ function validateRunArgs(args) {
   }
 }
 
+function parseForgeArgs(args) {
+  const parsed = {
+    url: "",
+    output: null,
+    name: null,
+    navigationTimeout: null,
+    unknownArgs: []
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "--output" || arg === "-o") {
+      parsed.output = readOptionValue(args, i, arg);
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--output=")) {
+      parsed.output = arg.slice("--output=".length);
+      continue;
+    }
+
+    if (arg === "--name") {
+      parsed.name = readOptionValue(args, i, "--name");
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--name=")) {
+      parsed.name = arg.slice("--name=".length);
+      continue;
+    }
+
+    if (arg === "--navigation-timeout") {
+      parsed.navigationTimeout = readOptionValue(args, i, "--navigation-timeout");
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--navigation-timeout=")) {
+      parsed.navigationTimeout = arg.slice("--navigation-timeout=".length);
+      continue;
+    }
+
+    if (!arg.startsWith("-") && !parsed.url) {
+      parsed.url = arg;
+      continue;
+    }
+
+    parsed.unknownArgs.push(arg);
+  }
+
+  return parsed;
+}
+
+function validateForgeArgs(args) {
+  if (args.unknownArgs.length > 0) {
+    throw new Error(`Unknown forge option: ${args.unknownArgs[0]}`);
+  }
+
+  if (args.output !== null && !String(args.output).trim()) {
+    throw new Error("--output requires a non-empty value.");
+  }
+
+  if (args.name !== null && !String(args.name).trim()) {
+    throw new Error("--name requires a non-empty value.");
+  }
+
+  if (args.navigationTimeout !== null) {
+    validatePositiveIntegerArg(args.navigationTimeout, "--navigation-timeout");
+    args.navigationTimeout = Number(args.navigationTimeout);
+  }
+}
+
 function readOptionValue(args, index, name) {
   const value = args[index + 1];
 
@@ -761,6 +861,7 @@ function printHelp() {
 
 Usage:
   orbittest init
+  orbittest forge [url] [--name "Test name"]
   orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS] [--trace] [--ci] [--show-browser|--hide-browser]
   orbittest studio [--port N] [--host HOST] [--no-open]
   orbittest clean-reports [--dry-run] [--passed N] [--failed N] [--max-age-days N]
@@ -769,6 +870,8 @@ Usage:
 
 Examples:
   orbittest init
+  orbittest forge
+  orbittest forge https://example.com --name "Login flow"
   orbittest run
   orbittest run tests/login.test.js --trace
   orbittest run tests/login.test.js --step
@@ -778,6 +881,25 @@ Examples:
   orbittest run --ci --github-annotations
   orbittest studio
   orbittest clean-reports --dry-run
+`);
+}
+
+function printForgeHelp() {
+  console.log(`Usage:
+  orbittest forge [url] [--output FILE] [--name "Test name"] [--navigation-timeout MS]
+
+OrbitTest Forge opens a fresh app browser plus a separate app-style recorder
+window without a URL bar, then records your journey as an OrbitTest test
+script. By default it does not create any file. Use the Forge panel for live
+script preview, Copy Script, Verify Next Click, and Stop Recording.
+
+Pass --output only when you explicitly want Forge to write a file.
+
+Examples:
+  orbittest forge
+  orbittest forge https://example.com
+  orbittest forge https://example.com --name "Login flow"
+  orbittest forge https://example.com --output tests/login.test.js
 `);
 }
 

@@ -2,12 +2,13 @@
 // Licensed under the Apache License, Version 2.0.
 
 const { buildLocatorExpression } = require("../helpers/locators");
+const { buildRuntimeEvaluateParams } = require("../helpers/runtime");
 
 async function focusInput(connection, target, options = {}) {
-  const response = await connection.send("Runtime.evaluate", {
-    expression: buildLocatorExpression(target, "focusInput"),
-    returnByValue: true
-  }, {
+  const response = await connection.send("Runtime.evaluate", buildRuntimeEvaluateParams(
+    buildLocatorExpression(target, "focusInput"),
+    options
+  ), {
     timeoutMs: normalizeInteger(options.locatorTimeout ?? options.locatorTimeoutMs, 3000)
   });
 

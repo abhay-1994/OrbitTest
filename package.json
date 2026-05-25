@@ -1,10 +1,14 @@
 {
   "name": "orbittest",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Browser automation test runner built on Chrome DevTools Protocol.",
   "main": "orbit.js",
+  "types": "index.d.ts",
   "exports": {
-    ".": "./orbit.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./orbit.js"
+    }
   },
   "bin": {
     "orbittest": "cli.js"
@@ -12,6 +16,7 @@
   "files": [
     "cli.js",
     "orbit.js",
+    "index.d.ts",
     "core",
     "pages",
     "runner",
@@ -25,6 +30,7 @@
   ],
   "scripts": {
     "test": "node cli.js run",
+    "unit": "node --test tests/unit/**/*.unit.js",
     "prepublishOnly": "npm test"
   },
   "keywords": [
@@ -44,5 +50,8 @@
   "dependencies": {
     "puppeteer": "^24.42.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

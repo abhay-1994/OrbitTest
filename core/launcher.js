@@ -35,7 +35,15 @@ async function launchChrome(options = {}) {
   ];
 
   if (hideBrowser) {
-    chromeArgs.splice(chromeArgs.length - 1, 0, "--headless=new", "--hide-scrollbars", "--mute-audio");
+    chromeArgs.splice(
+      chromeArgs.length - 1,
+      0,
+      "--headless=new",
+      "--hide-scrollbars",
+      "--mute-audio",
+      "--window-size=1366,768",
+      "--force-device-scale-factor=1"
+    );
   } else {
     chromeArgs.splice(chromeArgs.length - 1, 0, "--start-maximized", "--window-position=0,0", "--window-size=1366,900");
   }
