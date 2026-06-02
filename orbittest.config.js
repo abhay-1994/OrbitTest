@@ -11,8 +11,29 @@ module.exports = {
   browser: {
     display: "auto"
   },
+  use: {
+    web: {
+      browser: "chrome",
+      headless: null
+    },
+    mobile: process.env.ORBITTEST_MOBILE === "1"
+      ? {
+        provider: "@orbittest/mobile",
+        platform: "android",
+        adbPath: process.env.ADB_PATH || "adb",
+        deviceSerial: process.env.DEVICE_SERIAL || null,
+        apk: process.env.ORBITTEST_APK || "./app.apk",
+        appPackage: process.env.ORBITTEST_APP_PACKAGE || null,
+        appActivity: process.env.ORBITTEST_APP_ACTIVITY || null,
+        artifactsDir: "orbittest-results",
+        screenshotOnFailure: true,
+        logcatOnFailure: true,
+        uiDumpOnFailure: true
+      }
+      : null
+  },
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   },

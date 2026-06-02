@@ -17,7 +17,7 @@ await orbit.type("Email", "user@example.com");
 expect(await orbit.hasText("Welcome")).toBe(true);
 ```
 
-Internally, OrbitTest should be separated into clear modules for CLI, config, runner, browser control, page actions, locators, visual automation, reports, Studio, and future API automation.
+Internally, OrbitTest should be separated into clear modules for CLI, config, runner, browser control, page actions, locators, visual automation, reports, UI, and future API automation.
 
 ## Current Status
 
@@ -30,7 +30,7 @@ Current product directions:
 - Visual automation
 - Reports
 - Smart Report
-- Studio/UI
+- UI
 - CI/CD
 - Future API automation
 
@@ -48,7 +48,7 @@ This is a strong product direction, but each feature needs a clear internal home
 | CI/CD | Stable | CI mode, sharding, retries, fail-fast, GitHub annotations |
 | Smart Report | Stable | Browser evidence and failure diagnosis |
 | Browser display control | Stable | `--show-browser`, `--hide-browser`, `browser.display` |
-| Studio/UI | Stable | Local dashboard and run center |
+| UI | Stable | Local dashboard and run center |
 | Visual automation | Experimental | `orbit.evaluate()`, `orbit.mouse.*`, `orbit.visual.*` |
 | Browser storage/session state | Stable | `orbit.storage.*`, cookies, localStorage, sessionStorage, saved session files |
 | API automation | Future | Do not add during current freeze |
@@ -103,7 +103,7 @@ It is responsible for:
 
 - Starting a new project with `orbittest init`
 - Running tests with `orbittest run`
-- Starting Studio with `orbittest studio` and `orbittest ui`
+- Starting OrbitTest UI with `orbittest ui`
 - Cleaning reports with `orbittest clean-reports`
 - Showing help and version output
 - Loading `orbittest.config.js`
@@ -124,7 +124,7 @@ What should not grow here:
 - Browser automation logic
 - Report rendering logic
 - Locator matching logic
-- Studio business logic
+- UI business logic
 
 Near-term improvements:
 
@@ -594,9 +594,9 @@ Near-term improvements:
 - Keep report rendering separate from collection
 - Add tests around failure-gating rules
 
-## Orbit Studio
+## OrbitTest UI
 
-Orbit Studio is the local dashboard for running and inspecting tests.
+OrbitTest UI is the local dashboard for running and inspecting tests.
 
 Current files:
 
@@ -606,7 +606,6 @@ Current files:
 Commands:
 
 ```bash
-orbittest studio
 orbittest ui
 ```
 
@@ -617,7 +616,7 @@ It is responsible for:
 - Showing live command output
 - Showing recent reports
 - Showing Orbit Intelligence
-- Stopping Studio cleanly
+- Stopping UI cleanly
 - Releasing the local port after shutdown
 
 Status:
@@ -627,9 +626,9 @@ Status:
 
 Near-term improvements:
 
-- Move Studio into `core/studio/*` or `studio/*`
-- Add Studio start/stop regression test
-- Keep Studio calling CLI/runner APIs instead of owning test logic
+- Move UI into `core/ui/*` or `ui/*`
+- Add UI start/stop regression test
+- Keep UI calling CLI/runner APIs instead of owning test logic
 
 ## Orbit CI
 
@@ -709,7 +708,7 @@ module.exports = {
     display: "auto"
   },
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   },
@@ -756,8 +755,10 @@ module.exports = {
 | Report cleanup | `runner/report-cleanup.js` | Report retention policy, old run deletion |
 | CI annotations | `runner/ci-annotations.js` | GitHub annotation output for failed/flaky tests |
 | Reports | `core/reports/html.js`, `core/reports/json.js`, `core/reports/junit.js`, `core/reports/trace.js` | HTML/JSON/JUnit/trace report rendering |
-| Studio | `runner/studio-server.js` | Local dashboard, run controls, report center |
+| Provider bridge | `core/providers/mobile.js` | Optional mobile provider loading, Desktop-safe runtime defaults, failure artifact bridge |
+| UI | `runner/studio-server.js` | Local dashboard, run controls, report center |
 | Public API | `orbit.js` | `Orbit` object and exported test APIs |
+| Mobile provider | `packages/mobile/src/*` | Android automation through ADB + UIAutomator, device listing, doctor checks, artifacts |
 
 ## Target Structure
 
@@ -784,6 +785,8 @@ core/
     junit.js           ✓ done
     trace.js           ✓ done
     cleanup.js         ✓ done (as runner/report-cleanup.js)
+  providers/
+    mobile.js          ✓ phase 1 provider bridge
   api/
     README.md          reserved for future API automation
 
@@ -792,7 +795,16 @@ runner/
   failure-diagnostics.js  ✓ done
   report-cleanup.js    ✓ done
   ci-annotations.js    ✓ done
-  studio-server.js     next: split into studio/server.js + studio/sse.js
+  studio-server.js     next: split into ui/server.js + ui/sse.js
+
+packages/
+  mobile/
+    src/
+      adb.js           ADB execution and device serial resolution
+      device.js        OrbitDevice public mobile API
+      uiautomator.js   XML dump parsing
+      artifacts.js     screenshot, UI dump, logcat, error/result artifacts
+      doctor.js        Android environment checks
 ```
 
 Do not move everything at once. Move one boundary at a time and run smoke tests after each move.
@@ -812,7 +824,7 @@ Do not move everything at once. Move one boundary at a time and run smoke tests 
 | Page actions | `pages/actions/*`, `pages/helpers/*` | Locators, clicks, typing, waits, text extraction |
 | Runner | `runner/runner.js` | Test registration, execution, retries, CI mode, reports |
 | Reports | `runner/runner.js`, `core/reports/*`, `runner/report-server.js`, `runner/report-logo.js` | HTML/JSON/JUnit/summary reports and local report serving |
-| Studio | `runner/studio-server.js` | Local dashboard, run controls, report center, Orbit Intelligence |
+| UI | `runner/studio-server.js` | Local dashboard, run controls, report center, Orbit Intelligence |
 | Public API | `orbit.js` | `Orbit` object and exported test APIs |
 
 ## Feature Map
@@ -826,7 +838,7 @@ Do not move everything at once. Move one boundary at a time and run smoke tests 
 | Visual automation | Experimental | `orbit.evaluate()`, `orbit.mouse.*`, `orbit.visual.*` | `core/browser/evaluation.js`, `core/visual/index.js`, `orbit.js` | `tests/visual-features.test.js`, `tests/pinthing.visual.test.js` | `README.md`, `VISUAL_AUTOMATION_APIS.txt` |
 | Browser storage/session state | Stable | `orbit.storage.*` | `core/storage/index.js`, `orbit.js` | `tests/storage.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Reports | Stable | `orbittest run`, `--trace`, `--smart-report` | `runner/runner.js`, `runner/report-logo.js`, `runner/report-server.js` | `tests/example.test.js`, `tests/sample.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
-| Studio/UI | Stable | `orbittest studio`, `orbittest ui` | `runner/studio-server.js`, `cli.js` | Manual smoke for now | `README.md`, `docs/tutorial/how_to_use.md` |
+| UI | Stable | `orbittest ui` | `runner/studio-server.js`, `cli.js` | Manual smoke for now | `README.md`, `docs/tutorial/how_to_use.md` |
 | CI/CD | Stable | `--ci`, `--shard`, `--fail-fast`, `--max-failures`, `--github-annotations` | `core/config.js`, `runner/runner.js` | `tests/config.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Lifecycle hooks | Stable | `beforeAll()`, `afterAll()`, `beforeEach()`, `afterEach()`, `globalSetup` | `runner/runner.js`, `core/config.js`, `cli.js` | `tests/lifecycle.test.js` | `README.md`, `docs/tutorial/how_to_use.md` |
 | Smart Report | Stable | `--smart-report` | `orbit.js`, `runner/runner.js` | Existing browser smoke coverage | `README.md`, `docs/tutorial/how_to_use.md` |
@@ -915,7 +927,7 @@ But API automation should not be added until after the architecture cleanup rele
 
 ```js
 experimental: {
-  studio: true,
+  ui: true,
   visualAutomation: true,
   apiTesting: false
 }
@@ -968,20 +980,20 @@ await orbit.visual.findColor("#df1f1f")
   -> best matching point is returned
 ```
 
-## Execution Flow: Studio
+## Execution Flow: UI
 
 ```txt
-orbittest studio
-  -> cli.js starts Studio command
+orbittest ui
+  -> cli.js starts UI command
   -> runner/studio-server.js starts local server
   -> browser opens dashboard
-  -> dashboard calls Studio API
-  -> Studio starts CLI test runs
+  -> dashboard calls UI API
+  -> UI starts CLI test runs
   -> live output is streamed
   -> reports are discovered from reports directory
 ```
 
-Studio must stay separate from core execution. It can call the runner, but it should not own test execution logic.
+UI must stay separate from core execution. It can call the runner, but it should not own test execution logic.
 
 ## Execution Flow: Reports
 
@@ -1066,13 +1078,13 @@ These are architecture tasks, not new features:
 - Done: move CI annotations into `runner/ci-annotations.js`
 - Next: move notification permission helpers into `core/browser/permissions.js`
 - Next: move locator engine into `core/locator/index.js`
-- Later: split `runner/studio-server.js` into `studio/server.js` + `studio/sse.js`
+- Later: split `runner/studio-server.js` into `ui/server.js` + `ui/sse.js`
 
 ## Suggested Release Path
 
 ```txt
-3.3.0 = Forge + frame/shadow automation + TypeScript definitions + Studio live frames + architecture split
-3.2.0 = Studio + Visual Automation + browser display controls + architecture cleanup + storage/session intelligence
+3.3.0 = Forge + frame/shadow automation + TypeScript definitions + UI live frames + architecture split
+3.2.0 = UI + Visual Automation + browser display controls + architecture cleanup + storage/session intelligence
 3.x = Continued architecture cleanup + stability
 4.0.0 = API automation
 ```

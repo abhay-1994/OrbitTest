@@ -55,6 +55,8 @@ function isTestFile(filePath, config, cwd) {
 }
 
 function loadConfig(cwd) {
+  loadDotenv(cwd);
+
   const configPath = path.join(cwd, "orbittest.config.js");
 
   let config = {};
@@ -99,7 +101,8 @@ function normalizeConfig(config = {}) {
     experimental: normalizeExperimentalConfig(config.experimental, defaults.experimental),
     openReportOnFailure: normalizeOpenReportOnFailureConfig(config.openReportOnFailure, defaults.openReportOnFailure),
     reportRetention: normalizeReportRetentionConfig(config.reportRetention, defaults.reportRetention),
-    ci: normalizeCiConfig(config.ci, defaults.ci)
+    ci: normalizeCiConfig(config.ci, defaults.ci),
+    use: normalizeUseConfig(config.use, defaults.use)
   };
 
   if (normalized.testMatch.some(pattern => typeof pattern !== "string" || !pattern.trim())) {
@@ -126,7 +129,7 @@ function getDefaultConfig() {
       display: "auto"
     },
     experimental: {
-      studio: true,
+      ui: true,
       visualAutomation: true,
       apiTesting: false
     },
@@ -155,6 +158,13 @@ function getDefaultConfig() {
       summary: true,
       junit: true,
       githubAnnotations: Boolean(process.env.GITHUB_ACTIONS)
+    },
+    use: {
+      web: {
+        browser: "chrome",
+        headless: null
+      },
+      mobile: null
     }
   };
 }
@@ -187,7 +197,8 @@ function validateConfigKeys(config, defaults) {
     "openReportOnFailure",
     "reportRetention",
     "browser",
-    "ci"
+    "ci",
+    "use"
   ]);
 
   for (const key of Object.keys(config)) {
@@ -195,6 +206,129 @@ function validateConfigKeys(config, defaults) {
       throw new Error(`Invalid orbittest.config.js: unknown option "${key}".`);
     }
   }
+}
+
+function loadDotenv(cwd) {
+  try {
+    require("dotenv").config({
+      path: path.join(cwd, ".env"),
+      quiet: true
+    });
+  } catch (error) {
+    // dotenv is optional at runtime for existing installations.
+  }
+}
+
+function normalizeUseConfig(value, fallback) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid orbittest.config.js: use must be an object.");
+  }
+
+  const allowed = new Set(["web", "mobile"]);
+
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new Error(`Invalid orbittest.config.js: unknown use option "${key}".`);
+    }
+  }
+
+  return {
+    web: normalizeUseWebConfig(value.web, fallback.web),
+    mobile: normalizeUseMobileConfig(value.mobile, fallback.mobile)
+  };
+}
+
+function normalizeUseWebConfig(value, fallback) {
+  if (value === false) {
+    return false;
+  }
+
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid orbittest.config.js: use.web must be an object.");
+  }
+
+  const allowed = new Set(["browser", "headless"]);
+
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new Error(`Invalid orbittest.config.js: unknown use.web option "${key}".`);
+    }
+  }
+
+  return {
+    browser: normalizeString(value.browser, fallback.browser, "use.web.browser"),
+    headless: value.headless === undefined || value.headless === null
+      ? fallback.headless
+      : Boolean(value.headless)
+  };
+}
+
+function normalizeUseMobileConfig(value, fallback) {
+  if (value === undefined || value === null || value === false) {
+    return fallback;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid orbittest.config.js: use.mobile must be an object.");
+  }
+
+  const allowed = new Set([
+    "provider",
+    "platform",
+    "adbPath",
+    "deviceSerial",
+    "apk",
+    "appPackage",
+    "appActivity",
+    "artifactsDir",
+    "screenshotOnFailure",
+    "logcatOnFailure",
+    "uiDumpOnFailure",
+    "defaultTimeoutMs"
+  ]);
+
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new Error(`Invalid orbittest.config.js: unknown use.mobile option "${key}".`);
+    }
+  }
+
+  const platform = normalizeString(value.platform, "android", "use.mobile.platform").toLowerCase();
+
+  if (platform !== "android") {
+    throw new Error("Invalid orbittest.config.js: use.mobile.platform must be android.");
+  }
+
+  return {
+    provider: normalizeString(value.provider, "@orbittest/mobile", "use.mobile.provider"),
+    platform,
+    adbPath: normalizeString(value.adbPath ?? process.env.ADB_PATH, "adb", "use.mobile.adbPath"),
+    deviceSerial: normalizeOptionalString(value.deviceSerial ?? process.env.DEVICE_SERIAL, "use.mobile.deviceSerial"),
+    apk: normalizeOptionalString(value.apk, "use.mobile.apk"),
+    appPackage: normalizeOptionalString(value.appPackage, "use.mobile.appPackage"),
+    appActivity: normalizeOptionalString(value.appActivity, "use.mobile.appActivity"),
+    artifactsDir: normalizeString(value.artifactsDir, "orbittest-results", "use.mobile.artifactsDir"),
+    screenshotOnFailure: value.screenshotOnFailure !== undefined ? Boolean(value.screenshotOnFailure) : true,
+    logcatOnFailure: value.logcatOnFailure !== undefined ? Boolean(value.logcatOnFailure) : true,
+    uiDumpOnFailure: value.uiDumpOnFailure !== undefined ? Boolean(value.uiDumpOnFailure) : true,
+    defaultTimeoutMs: normalizePositiveInteger(value.defaultTimeoutMs, 5000, "use.mobile.defaultTimeoutMs")
+  };
+}
+
+function normalizeOptionalString(value, name) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  return normalizeString(value, null, name);
 }
 
 function normalizeString(value, fallback, name) {
@@ -325,7 +459,7 @@ function normalizeExperimentalConfig(value, fallback) {
     throw new Error("Invalid orbittest.config.js: experimental must be an object.");
   }
 
-  const allowed = new Set(["studio", "visualAutomation", "apiTesting"]);
+  const allowed = new Set(["ui", "studio", "visualAutomation", "apiTesting"]);
 
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
@@ -333,8 +467,15 @@ function normalizeExperimentalConfig(value, fallback) {
     }
   }
 
+  const ui = value.ui !== undefined
+    ? Boolean(value.ui)
+    : value.studio !== undefined
+      ? Boolean(value.studio)
+      : Boolean(fallback.ui ?? fallback.studio);
+
   return {
-    studio: value.studio !== undefined ? Boolean(value.studio) : fallback.studio,
+    ui,
+    studio: ui,
     visualAutomation: value.visualAutomation !== undefined ? Boolean(value.visualAutomation) : fallback.visualAutomation,
     apiTesting: value.apiTesting !== undefined ? Boolean(value.apiTesting) : fallback.apiTesting
   };

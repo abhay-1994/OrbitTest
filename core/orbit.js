@@ -1148,7 +1148,7 @@ class Orbit {
         `${String(frameIndex).padStart(3, '0')}-${slugify(frame.name)}.png`
       );
 
-      const dialog = await this.closeBlockingDialogForCapture('studio frame');
+      const dialog = await this.closeBlockingDialogForCapture('ui frame');
 
       if (dialog && !frame.dialog) {
         frame.dialog = serializeDialogForTrace(dialog);
@@ -1843,7 +1843,7 @@ function createStudioState(studio) {
 
   const dir = studio.dir
     ? path.resolve(studio.dir)
-    : path.join(process.cwd(), 'reports', 'studio-frames');
+    : path.join(process.cwd(), 'reports', 'ui-frames');
 
   return {
     enabled: true,

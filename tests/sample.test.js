@@ -168,3 +168,23 @@ test("Read visible text and DOM text separately", async (orbit) => {
   expect(await orbit.domText(orbit.css("#display-none"))).toBe("Display none token");
   expect(await orbit.domText("Hidden token")).toBe("Hidden token");
 });
+
+test("Use new page context without breaking old orbit context", async ({ page, orbit }) => {
+  const html = `
+    <main>
+      <button id="create">Create account</button>
+      <p id="status">Waiting</p>
+      <script>
+        document.querySelector("#create").addEventListener("click", () => {
+          document.querySelector("#status").textContent = "Created";
+        });
+      </script>
+    </main>
+  `;
+
+  await page.goto(`data:text/html,${encodeURIComponent(html)}`);
+  await page.clickText("Create account");
+
+  expect(await page.text(page.css("#status"))).toBe("Created");
+  expect(orbit).toBe(null);
+});

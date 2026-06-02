@@ -221,6 +221,7 @@ function renderEnhancedHtmlReport(report, reportsDir) {
   const statusClass = report.summary.status === 'passed' ? 'passed' : 'failed';
   const rows = report.results.map(result => renderEnhancedResultRow(result, reportsDir)).join('');
   const failureSection = renderEnhancedFailureSection(report, reportsDir);
+  const mobileSection = renderEnhancedMobileSection(report, reportsDir);
   const smartReportSection = renderEnhancedSmartReportSection(report);
   const traceSection = renderEnhancedTraceSection(report, reportsDir);
   const summarySection = renderRunSummary(report);
@@ -960,6 +961,94 @@ function renderEnhancedHtmlReport(report, reportsDir) {
       border-radius: 8px;
     }
 
+    .mobile-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+      padding: 18px;
+    }
+
+    .mobile-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .mobile-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.74fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .mobile-shot img {
+      display: block;
+      width: 100%;
+      max-height: 560px;
+      object-fit: contain;
+      background: #0f172a;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .mobile-chip-row,
+    .mobile-artifact-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .mobile-chip,
+    .mobile-artifact-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .mobile-artifact-links a {
+      color: var(--info);
+      background: #ffffff;
+    }
+
+    .mobile-list-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mobile-list {
+      padding: 10px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 0;
+    }
+
+    .mobile-list strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .mobile-list div {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
     .error-message {
       margin: 8px 0 0;
       padding: 12px;
@@ -1195,6 +1284,8 @@ function renderEnhancedHtmlReport(report, reportsDir) {
       .json-toolbar { display: block; }
       .json-actions { margin-top: 10px; }
       .two-col { grid-template-columns: 1fr; }
+      .mobile-head { display: block; }
+      .mobile-layout { grid-template-columns: 1fr; }
       table { display: block; overflow-x: auto; }
     }
   </style>
@@ -1218,6 +1309,7 @@ function renderEnhancedHtmlReport(report, reportsDir) {
     <div class="dashboard">
       ${summarySection}
       ${allTestsSection}
+      ${mobileSection || ''}
       ${failureSection || ''}
       ${traceSection || ''}
       ${smartReportSection || ''}
@@ -1343,11 +1435,11 @@ function renderReportInteractionsScript() {
 function renderReportVisualMap(report, reportsDir) {
   const results = report.results || [];
   const failedResults = results.filter(result => result.status === 'failed');
-  const screenshotResult = results.find(result => result.artifacts?.screenshot) || failedResults[0] || results[0] || null;
+  const screenshotResult = results.find(result => result.artifacts?.screenshot || result.artifacts?.mobile?.screenshot) || failedResults[0] || results[0] || null;
   const codeFrameResult = results.find(result => result.error?.codeFrame?.length) || failedResults[0] || results[0] || null;
   const traceResult = results.find(result => result.trace?.steps?.length) || null;
   const hasSmartEvidence = results.some(result => result.smartReport?.enabled);
-  const hasScreenshot = results.some(result => result.artifacts?.screenshot);
+  const hasScreenshot = results.some(result => result.artifacts?.screenshot || result.artifacts?.mobile?.screenshot);
   const hasCodeFrame = results.some(result => result.error?.codeFrame?.length);
   const hasTrace = Boolean(traceResult);
   const skipped = Math.max(0, Number(report.summary.total || 0) - Number(report.summary.passed || 0) - Number(report.summary.failed || 0));
@@ -1438,6 +1530,8 @@ function renderVisualScreenshotPreview(result, reportsDir) {
     'https://example.com';
   const screenshot = result?.artifacts?.screenshot
     ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}"><img src="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}" alt="${escapeHtml(result.name || 'OrbitTest screenshot')}"></a>`
+    : result?.artifacts?.mobile?.screenshot
+      ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.mobile.screenshot, reportsDir))}"><img src="${escapeHtml(toHrefForReport(result.artifacts.mobile.screenshot, reportsDir))}" alt="${escapeHtml(result.name || 'OrbitTest mobile screenshot')}"></a>`
     : '<div class="map-placeholder">Screenshot preview appears here when a screenshot is captured.</div>';
 
   return `
@@ -1598,6 +1692,186 @@ function renderCommonCausesSection(commonCauses) {
     </div>`;
 }
 
+function renderEnhancedMobileSection(report, reportsDir) {
+  const results = report.results.filter(result => getMobileEvidence(result));
+
+  if (results.length === 0) {
+    return '';
+  }
+
+  return `
+    <section>
+      <h2>Mobile Evidence</h2>
+      <p class="section-intro">Android-specific run evidence: device state, app context, UIAutomator output, screenshots, and mobile artifacts.</p>
+      <div class="stacked">
+        ${results.map(result => renderMobileEvidenceCard(result, reportsDir)).join('')}
+      </div>
+    </section>`;
+}
+
+function renderMobileEvidenceCard(result, reportsDir) {
+  const mobile = getMobileEvidence(result);
+  const device = mobile.device || {};
+  const app = mobile.app || {};
+  const ui = mobile.ui || {};
+  const screenSize = formatScreenSize(device.screenSize);
+  const factRows = [
+    ['Device', formatMobileValue(device.model)],
+    ['Android', formatMobileValue(device.androidVersion)],
+    ['Serial', formatMobileValue(device.serial)],
+    ['Screen', screenSize],
+    ['Screen On', formatBooleanOrValue(device.screenOn)],
+    ['Current Package', formatMobileValue(app.currentPackage)],
+    ['Current Activity', formatMobileValue(app.currentActivity)],
+    ['Configured Package', formatMobileValue(app.configuredPackage)],
+    ['UI Nodes', formatCount(ui.nodeCount)],
+    ['Clickable Nodes', formatCount(ui.clickableNodeCount)]
+  ];
+  const chips = [
+    mobile.mode ? `Mode ${mobile.mode}` : null,
+    mobile.provider || null,
+    mobile.capturedAt ? `Captured ${mobile.capturedAt}` : null
+  ].filter(Boolean);
+  const errors = [
+    mobile.screenshotError ? `Screenshot: ${mobile.screenshotError}` : null,
+    mobile.uiDumpError ? `UI dump: ${mobile.uiDumpError}` : null,
+    mobile.logcatError ? `Logcat: ${mobile.logcatError}` : null
+  ].filter(Boolean);
+
+  return `
+    <article class="mobile-card">
+      <div class="mobile-head">
+        <div>
+          <h3>${escapeHtml(result.name)}</h3>
+          ${result.file ? `<div class="muted small">${escapeHtml(path.relative(process.cwd(), result.file))}</div>` : ''}
+          <div class="mobile-chip-row">
+            ${chips.map(chip => `<span class="mobile-chip">${escapeHtml(chip)}</span>`).join('')}
+          </div>
+        </div>
+        <span class="badge ${escapeHtml(result.status)}">${escapeHtml(result.status)}</span>
+      </div>
+
+      <div class="mobile-layout">
+        <div class="stacked">
+          <div class="fact-grid">
+            ${factRows.map(([label, value]) => `
+              <div class="fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+            `).join('')}
+          </div>
+
+          ${renderMobileArtifactLinks(mobile, reportsDir)}
+
+          <div class="mobile-list-grid">
+            ${renderMobileList('Visible Text', ui.texts)}
+            ${renderMobileList('Resource IDs', ui.resourceIds)}
+            ${renderMobileList('Descriptions', ui.descriptions)}
+          </div>
+
+          ${errors.length ? `
+            <div class="evidence-list">
+              ${errors.map(error => `<div class="evidence-item"><strong>Capture Warning</strong>${escapeHtml(error)}</div>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="mobile-shot">
+          ${renderMobileScreenshot(mobile, result, reportsDir)}
+        </div>
+      </div>
+    </article>`;
+}
+
+function renderMobileScreenshot(mobile, result, reportsDir) {
+  if (mobile.screenshot) {
+    const href = toHrefForReport(mobile.screenshot, reportsDir);
+    return `<a href="${escapeHtml(href)}"><img src="${escapeHtml(href)}" alt="${escapeHtml(result.name)} mobile screenshot"></a>`;
+  }
+
+  if (mobile.screenshotError) {
+    return `<div class="empty-state">Mobile screenshot was not captured: ${escapeHtml(mobile.screenshotError)}</div>`;
+  }
+
+  return '<div class="empty-state">No mobile screenshot was captured for this test.</div>';
+}
+
+function renderMobileArtifactLinks(mobile, reportsDir) {
+  const links = [
+    ['screenshot', 'Screenshot'],
+    ['uiXml', 'UI XML'],
+    ['uiJson', 'UI JSON'],
+    ['logcat', 'Logcat'],
+    ['error', 'Error'],
+    ['result', 'Result JSON'],
+    ['metadata', 'Mobile JSON']
+  ]
+    .filter(([key]) => mobile[key])
+    .map(([key, label]) => `<a href="${escapeHtml(toHrefForReport(mobile[key], reportsDir))}">${escapeHtml(label)}</a>`);
+
+  if (links.length === 0) {
+    return '<div class="muted">No mobile artifact files were captured.</div>';
+  }
+
+  return `<div class="mobile-artifact-links">${links.join('')}</div>`;
+}
+
+function renderMobileList(title, items = []) {
+  const values = Array.isArray(items) ? items.filter(Boolean) : [];
+  const body = values.length
+    ? values.slice(0, 10).map(item => `<div>${escapeHtml(item)}</div>`).join('')
+    : '<div>None captured</div>';
+
+  return `
+    <div class="mobile-list">
+      <strong>${escapeHtml(title)}</strong>
+      ${body}
+    </div>`;
+}
+
+function getMobileEvidence(result) {
+  return result?.artifacts?.mobile || null;
+}
+
+function formatScreenSize(value) {
+  if (value && typeof value === 'object' && Number.isFinite(Number(value.width)) && Number.isFinite(Number(value.height))) {
+    return `${value.width} x ${value.height}`;
+  }
+
+  return formatMobileValue(value);
+}
+
+function formatBooleanOrValue(value) {
+  if (value === true) {
+    return 'Yes';
+  }
+
+  if (value === false) {
+    return 'No';
+  }
+
+  return formatMobileValue(value);
+}
+
+function formatCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number) : '0';
+}
+
+function formatMobileValue(value) {
+  if (value === undefined || value === null || value === '') {
+    return 'Unknown';
+  }
+
+  if (typeof value === 'object') {
+    if (value.error) {
+      return `Unavailable: ${value.error}`;
+    }
+
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
 function renderEnhancedSmartReportSection(report) {
   const results = report.results.filter(result => result.smartReport?.enabled);
 
@@ -1629,9 +1903,12 @@ function renderEnhancedSmartReportSection(report) {
 }
 
 function renderEnhancedResultRow(result, reportsDir) {
+  const mobile = getMobileEvidence(result);
   const evidence = [
     result.artifacts.screenshot ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}">Screenshot</a>` : null,
     result.artifacts.trace ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.trace, reportsDir))}">Trace file</a>` : null,
+    mobile?.screenshot ? `<a href="${escapeHtml(toHrefForReport(mobile.screenshot, reportsDir))}">Mobile screenshot</a>` : null,
+    mobile ? '<span class="muted">Mobile evidence</span>' : null,
     result.smartReport?.enabled ? '<span class="muted">Smart evidence</span>' : null
   ].filter(Boolean).join(' | ') || '<span class="muted">None</span>';
   const message = result.error
@@ -1672,8 +1949,11 @@ function renderEnhancedFailureSection(report, reportsDir) {
 function renderEnhancedFailureCard(result, reportsDir) {
   const diagnostics = result.diagnostics || buildFailureDiagnostics(result);
   const source = diagnostics?.source || result.error?.location || null;
+  const mobile = getMobileEvidence(result);
   const screenshot = result.artifacts.screenshot
     ? `<a href="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}"><img src="${escapeHtml(toHrefForReport(result.artifacts.screenshot, reportsDir))}" alt="${escapeHtml(result.name)} failure screenshot"></a>`
+    : mobile?.screenshot
+      ? `<a href="${escapeHtml(toHrefForReport(mobile.screenshot, reportsDir))}"><img src="${escapeHtml(toHrefForReport(mobile.screenshot, reportsDir))}" alt="${escapeHtml(result.name)} mobile failure screenshot"></a>`
     : result.artifacts.snapshot
       ? `<div class="muted">Screenshot capture was not available. Open the failure snapshot captured after the smart failure: <a href="${escapeHtml(toHrefForReport(result.artifacts.snapshot, reportsDir))}">Failure snapshot</a>${result.artifacts.screenshotError ? ` (${escapeHtml(result.artifacts.screenshotError)})` : ''}</div>`
     : `<div class="muted">No failure screenshot was captured.${result.artifacts.screenshotError ? ` ${escapeHtml(result.artifacts.screenshotError)}` : ''}</div>`;
@@ -1728,7 +2008,7 @@ function renderEnhancedFailureCard(result, reportsDir) {
 
         <div class="stacked evidence">
           <div>
-            <h3>Failure Screenshot</h3>
+            <h3>${mobile?.screenshot && !result.artifacts.screenshot ? 'Mobile Failure Screenshot' : 'Failure Screenshot'}</h3>
             ${screenshot}
           </div>
           ${traceTimeline ? `<div><h3>Trace In This Report</h3>${traceTimeline}</div>` : ''}

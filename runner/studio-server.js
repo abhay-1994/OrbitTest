@@ -134,8 +134,8 @@ async function handleRequest(req, res, state) {
     return;
   }
 
-  if (req.method === 'POST' && pathname === '/api/studio/stop') {
-    scheduleStudioShutdown(state, 'requested from Studio UI');
+  if (req.method === 'POST' && pathname === '/api/ui/stop') {
+    scheduleStudioShutdown(state, 'requested from OrbitTest UI');
     sendJson(res, 200, { stopping: true });
     return;
   }
@@ -174,7 +174,7 @@ function buildStudioState(state) {
     reports,
     activeRun: toPublicRun(state.activeRun),
     history: state.runHistory.slice(-10).map(toPublicRun),
-    studio: {
+    ui: {
       shuttingDown: state.shuttingDown,
       shutdownReason: state.shutdownReason
     }
@@ -227,8 +227,8 @@ function startRun(state, body = {}) {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
-      ORBITTEST_STUDIO_EVENTS: '1',
-      ORBITTEST_STUDIO_FRAMES: '1'
+      ORBITTEST_UI_EVENTS: '1',
+      ORBITTEST_UI_FRAMES: '1'
     },
     windowsHide: true
   });
@@ -998,7 +998,7 @@ function renderStudioHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OrbitTest Studio</title>
+  <title>OrbitTest UI</title>
   <style>
     :root {
       color-scheme: light;
@@ -2004,7 +2004,7 @@ function renderStudioHtml() {
       text-align: right;
     }
 
-    .studio-viewer {
+    .ui-viewer {
       margin-top: 14px;
       overflow: hidden;
       border: 1px solid #0f172a;
@@ -2379,7 +2379,7 @@ function renderStudioHtml() {
         </div>
         <div>
           <div class="eyebrow">Automation Command Center</div>
-          <h1>OrbitTest Studio</h1>
+          <h1>OrbitTest UI</h1>
           <div class="muted" id="projectMeta">Loading project...</div>
           <div class="app-meta">
             <span class="meta-pill" id="testDirMeta">tests</span>
@@ -2391,7 +2391,7 @@ function renderStudioHtml() {
       <div class="toolbar">
         <button type="button" id="refreshButton">Refresh</button>
         <a class="button-link" id="latestReportLink" href="#" target="_blank" rel="noreferrer">Latest Report</a>
-        <button class="danger" type="button" id="stopStudioButton">Stop Studio</button>
+        <button class="danger" type="button" id="stopStudioButton">Stop UI</button>
       </div>
     </header>
 
@@ -2519,7 +2519,7 @@ function renderStudioHtml() {
             <button class="run-tab" data-tab="console">Console</button>
           </div>
           <div id="executionPanel">
-            <div class="studio-viewer" id="studioViewer">
+            <div class="ui-viewer" id="uiViewer">
               <div class="viewer-stage">
                 <div class="browser-shell" aria-label="Embedded browser replay">
                   <div class="browser-chrome">
@@ -3218,7 +3218,7 @@ function renderStudioHtml() {
     }
 
     async function stopStudio() {
-      const ok = window.confirm('Stop OrbitTest Studio and release this port? Any running test will be stopped.');
+      const ok = window.confirm('Stop OrbitTest UI and release this port? Any running test will be stopped.');
 
       if (!ok) {
         return;
@@ -3233,17 +3233,17 @@ function renderStudioHtml() {
       els.stopStudioButton.textContent = 'Stopping...';
 
       try {
-        const response = await fetch('/api/studio/stop', {
+        const response = await fetch('/api/ui/stop', {
           method: 'POST',
           keepalive: true
         });
 
         if (!response.ok) {
-          throw new Error('Could not stop OrbitTest Studio.');
+          throw new Error('Could not stop OrbitTest UI.');
         }
       } catch (error) {
         els.stopStudioButton.disabled = false;
-        els.stopStudioButton.textContent = 'Stop Studio';
+        els.stopStudioButton.textContent = 'Stop UI';
         throw error;
       }
 
@@ -3251,7 +3251,7 @@ function renderStudioHtml() {
     }
 
     function closeStudioTab() {
-      document.title = 'OrbitTest Studio';
+      document.title = 'OrbitTest UI';
       document.body.innerHTML = '';
       document.documentElement.style.background = '#fff';
       document.body.style.background = '#fff';
@@ -3308,7 +3308,7 @@ function renderStudioHtml() {
     }
 
     function ensurePlayerInViewport() {
-      var viewer = document.querySelector('#studioViewer');
+      var viewer = document.querySelector('#uiViewer');
       if (!viewer) return;
 
       var rect = viewer.getBoundingClientRect();
@@ -3965,7 +3965,7 @@ function contentTypeFor(filePath) {
 }
 
 function createStudioRunId(date) {
-  return `studio-${date.toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '')}`;
+  return `ui-${date.toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '')}`;
 }
 
 function unescapeJsString(value) {

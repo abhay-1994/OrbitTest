@@ -95,7 +95,7 @@ function getSampleConfig() {
     display: "auto"
   },
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   },

@@ -23,6 +23,10 @@ const {
   resolveTraceMode
 } = require("./core/config");
 const { initProject } = require("./core/scaffold");
+const {
+  listMobileDevices,
+  runMobileDoctor
+} = require("./core/providers/mobile");
 
 Module._resolveFilename = function resolveOrbitTest(request, parent, isMain, options) {
   if (request === "orbittest") {
@@ -65,6 +69,16 @@ async function main() {
     return;
   }
 
+  if (command === "devices") {
+    await devicesCommand(args.slice(1));
+    return;
+  }
+
+  if (command === "doctor") {
+    await doctorCommand(args.slice(1));
+    return;
+  }
+
   if (command === "forge") {
     await forgeCommand(args.slice(1));
     return;
@@ -75,7 +89,7 @@ async function main() {
     return;
   }
 
-  if (command === "studio" || command === "ui") {
+  if (command === "ui") {
     await studioCommand(args.slice(1));
     return;
   }
@@ -102,8 +116,8 @@ async function studioCommand(args) {
     reportsDir: studioArgs.reportsDir || null
   });
 
-  console.log("\nOrbitTest Studio");
-  console.log("----------------");
+  console.log("\nOrbitTest UI");
+  console.log("------------");
   console.log(`URL: ${studio.url}`);
   console.log(`Project: ${studio.root}`);
   console.log(`Reports: ${path.relative(process.cwd(), studio.reportsDir) || "."}`);
@@ -116,13 +130,13 @@ async function studioCommand(args) {
     }
 
     stoppingStudio = true;
-    console.log("\nStopping OrbitTest Studio...");
+    console.log("\nStopping OrbitTest UI...");
 
     try {
       await studio.close();
-      console.log("OrbitTest Studio stopped.");
+      console.log("OrbitTest UI stopped.");
     } catch (error) {
-      console.error(`Failed to stop OrbitTest Studio cleanly: ${error.message || error}`);
+      console.error(`Failed to stop OrbitTest UI cleanly: ${error.message || error}`);
     }
 
     if (signal) {
@@ -211,10 +225,112 @@ async function runTests(args) {
     smartReport: runArgs.smartReport ?? config.smartReport,
     smartReportSlowRequestMs: config.smartReportSlowRequestMs,
     verbose: runArgs.verbose,
+    projectRoot: process.env.PROJECT_ROOT || process.cwd(),
+    web: config.use.web,
+    mobile: config.use.mobile,
     openReportOnFailure: mergeOpenReportOnFailureOptions(config.openReportOnFailure, runArgs, ciOptions),
     reportRetention: config.reportRetention,
     ci: ciOptions
   });
+}
+
+async function devicesCommand(args) {
+  if (args.includes("-h") || args.includes("--help")) {
+    printDevicesHelp();
+    return;
+  }
+
+  if (args.length > 0) {
+    throw new Error(`Unknown devices option: ${args[0]}`);
+  }
+
+  const config = loadConfig(process.cwd());
+  const result = await listMobileDevices(config.use.mobile || {}, {
+    projectRoot: process.env.PROJECT_ROOT || process.cwd()
+  });
+
+  console.log("\nOrbitTest Devices");
+  console.log("-----------------");
+  console.log(`Mobile provider: ${result.provider}`);
+
+  if (!result.available) {
+    console.log(result.message);
+    return;
+  }
+
+  if (!result.devices.length) {
+    console.log("No Android devices found.");
+    return;
+  }
+
+  for (const device of result.devices) {
+    const pieces = [
+      `serial=${device.serial}`,
+      `state=${device.state}`,
+      device.model ? `model=${device.model}` : null,
+      device.androidVersion ? `android=${device.androidVersion}` : null
+    ].filter(Boolean);
+    console.log(pieces.join(" "));
+  }
+}
+
+async function doctorCommand(args) {
+  if (args.includes("-h") || args.includes("--help")) {
+    printDoctorHelp();
+    return;
+  }
+
+  if (args.length > 0) {
+    throw new Error(`Unknown doctor option: ${args[0]}`);
+  }
+
+  const checks = [];
+  checks.push({
+    name: "node",
+    status: Number(process.versions.node.split(".")[0]) >= 18 ? "ok" : "fail",
+    message: `Node ${process.version}`
+  });
+  checks.push({
+    name: "orbittest",
+    status: "ok",
+    message: `orbittest ${packageJson.version}`
+  });
+
+  let config = null;
+  const configPath = path.join(process.cwd(), "orbittest.config.js");
+
+  try {
+    config = loadConfig(process.cwd());
+    checks.push({
+      name: "config",
+      status: "ok",
+      message: path.relative(process.cwd(), configPath) || "orbittest.config.js"
+    });
+  } catch (error) {
+    checks.push({
+      name: "config",
+      status: "fail",
+      message: error.message || String(error)
+    });
+  }
+
+  if (config) {
+    checks.push(...await runMobileDoctor(config.use.mobile || {}, {
+      projectRoot: process.env.PROJECT_ROOT || process.cwd()
+    }));
+  }
+
+  console.log("\nOrbitTest Doctor");
+  console.log("----------------");
+
+  for (const check of checks) {
+    const label = check.status === "ok" ? "OK" : check.status === "warn" ? "WARN" : "FAIL";
+    console.log(`[${label}] ${check.name}: ${check.message}`);
+  }
+
+  if (checks.some(check => check.status === "fail")) {
+    process.exitCode = 1;
+  }
 }
 
 async function forgeCommand(args) {
@@ -457,7 +573,7 @@ function parseStudioArgs(args) {
 
 function validateStudioArgs(args) {
   if (args.unknownArgs.length > 0) {
-    throw new Error(`Unknown studio option: ${args.unknownArgs[0]}`);
+    throw new Error(`Unknown UI option: ${args.unknownArgs[0]}`);
   }
 
   if (args.port !== null) {
@@ -863,7 +979,9 @@ Usage:
   orbittest init
   orbittest forge [url] [--name "Test name"]
   orbittest run [test-file-or-directory] [--workers N|--parallel] [--retries N] [--timeout MS] [--trace] [--ci] [--show-browser|--hide-browser]
-  orbittest studio [--port N] [--host HOST] [--no-open]
+  orbittest devices
+  orbittest doctor
+  orbittest ui [--port N] [--host HOST] [--no-open]
   orbittest clean-reports [--dry-run] [--passed N] [--failed N] [--max-age-days N]
   orbittest --version
   orbittest --help
@@ -879,7 +997,9 @@ Examples:
   orbittest run tests/login.test.js --hide-browser
   orbittest run --ci --workers 4 --shard 1/4
   orbittest run --ci --github-annotations
-  orbittest studio
+  orbittest devices
+  orbittest doctor
+  orbittest ui
   orbittest clean-reports --dry-run
 `);
 }
@@ -946,18 +1066,35 @@ Examples:
 `);
 }
 
+function printDevicesHelp() {
+  console.log(`Usage:
+  orbittest devices
+
+Lists connected Android devices through @orbittest/mobile when the provider is
+installed. DEVICE_SERIAL and ADB_PATH are respected when present.
+`);
+}
+
+function printDoctorHelp() {
+  console.log(`Usage:
+  orbittest doctor
+
+Checks the local OrbitTest project, optional mobile provider, ADB, connected
+devices, UIAutomator dump, screenshot capture, and configured Android app.
+`);
+}
+
 function printStudioHelp() {
   console.log(`Usage:
-  orbittest studio [--port N] [--host HOST] [--reports-dir DIR] [--no-open]
   orbittest ui [--port N] [--host HOST] [--reports-dir DIR] [--no-open]
 
-OrbitTest Studio starts a local dashboard for running tests, reading reports,
+OrbitTest UI starts a local dashboard for running tests, reading reports,
 and inspecting recent failures.
 
 Examples:
-  orbittest studio
-  orbittest studio --port 9323
-  orbittest studio --no-open
+  orbittest ui
+  orbittest ui --port 9323
+  orbittest ui --no-open
   orbittest ui --reports-dir reports/staging
 `);
 }

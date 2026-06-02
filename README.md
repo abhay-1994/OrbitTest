@@ -27,10 +27,11 @@ OrbitTest lets you write tests using what users see — visible labels, roles, a
 - [Frames and Shadow DOM](#frames-and-shadow-dom)
 - [Browser Storage and Sessions](#browser-storage-and-sessions)
 - [Alerts, Notifications, and Windows](#alerts-notifications-and-windows)
+- [Mobile Testing](#mobile-testing)
 - [Visual Automation](#visual-automation)
 - [Reports and Diagnostics](#reports-and-diagnostics)
 - [CI/CD Integration](#cicd-integration)
-- [Studio](#studio)
+- [UI](#ui)
 - [Forge — Test Recorder](#forge--test-recorder)
 - [TypeScript](#typescript)
 - [Best Practices](#best-practices)
@@ -57,8 +58,9 @@ OrbitTest lets you write tests using what users see — visible labels, roles, a
 | CI/CD mode (sharding, fail-fast, annotations) | Stable |
 | Step trace and trace timeline | Stable |
 | Smart Report (browser evidence collection) | Stable |
-| Studio local dashboard | Stable |
+| UI local dashboard | Stable |
 | Forge test recorder | Stable |
+| Android mobile provider (`@orbittest/mobile`) | Phase 1 |
 | Visual automation (canvas, WebGL, pixel checks) | Experimental |
 | API testing | Planned |
 
@@ -174,9 +176,18 @@ module.exports = {
     display: "auto"  // "auto" | "show" | "hide"
   },
 
+  // Optional web/mobile provider config
+  use: {
+    web: {
+      browser: "chrome",
+      headless: null
+    },
+    mobile: null
+  },
+
   // Experimental features
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   },
@@ -316,8 +327,7 @@ Test files do not need an explicit `run()` call when invoked through the CLI.
 |---|---|
 | `orbittest run [files]` | Run tests |
 | `orbittest init` | Initialize a new project |
-| `orbittest studio` | Open the local Studio dashboard |
-| `orbittest ui` | Alias for `studio` |
+| `orbittest ui` | Open the local UI dashboard |
 | `orbittest forge [url]` | Open the Forge test recorder |
 | `orbittest clean-reports` | Remove old report runs |
 
@@ -353,12 +363,12 @@ Test files do not need an explicit `run()` call when invoked through the CLI.
 | `--failed <n>` | Number of failed runs to keep (default: 30) |
 | `--max-age-days <n>` | Remove runs older than N days (default: 30) |
 
-### `orbittest studio` flags
+### `orbittest ui` flags
 
 | Flag | Description |
 |---|---|
-| `--port <n>` | Port for the Studio server |
-| `--no-open` | Start Studio without opening a browser tab |
+| `--port <n>` | Port for the UI server |
+| `--no-open` | Start UI without opening a browser tab |
 | `--reports-dir <path>` | Reports directory to browse |
 
 ### `orbittest forge` flags
@@ -375,7 +385,7 @@ Test files do not need an explicit `run()` call when invoked through the CLI.
 |---|---|
 | `ORBITTEST_CHROME_PATH` | Path to a custom Chrome/Chromium executable |
 | `ORBITTEST_SHARD` | Shard assignment in `<n>/<total>` format (e.g. `1/4`) |
-| `ORBITTEST_STUDIO_EVENTS` | Internal: enables SSE event stream for Studio |
+| `ORBITTEST_UI_EVENTS` | Internal: enables SSE event stream for the UI |
 | `ORBITTEST_STEP_AUTO_CONTINUE` | Internal: auto-continue in step mode |
 | `CI` | Standard CI flag; enables headless browser and CI mode defaults |
 | `GITHUB_ACTIONS` | Standard GitHub Actions flag; enables GitHub annotation output |
@@ -775,6 +785,88 @@ Windows can be selected by index, target ID, URL/title text, regular expression,
 
 ---
 
+## Mobile Testing
+
+OrbitTest keeps mobile support in a separate provider package so the main web runner stays small and stable.
+
+```bash
+npm install orbittest @orbittest/mobile
+```
+
+Android requirements:
+
+- Android SDK platform tools installed
+- USB debugging enabled on the device
+- `adb devices` shows the device as `device`
+- OrbitTest Desktop may inject `DEVICE_SERIAL`, `ADB_PATH`, and `PROJECT_ROOT`
+
+Configure mobile in `orbittest.config.js`:
+
+```js
+module.exports = {
+  use: {
+    mobile: {
+      provider: "@orbittest/mobile",
+      platform: "android",
+      adbPath: process.env.ADB_PATH || "adb",
+      deviceSerial: process.env.DEVICE_SERIAL,
+      apk: "./app.apk",
+      appPackage: "com.myapp",
+      appActivity: ".MainActivity",
+      artifactsDir: "orbittest-results",
+      screenshotOnFailure: true,
+      logcatOnFailure: true,
+      uiDumpOnFailure: true
+    }
+  }
+};
+```
+
+Write a mobile test:
+
+```js
+const { test, expect } = require("orbittest");
+
+test("mobile smoke test", async ({ orbit }) => {
+  await orbit.wakeUp();
+  await orbit.installApp();
+  await orbit.launchApp();
+  await orbit.waitForText("Login", 10000);
+  await expect(orbit).toHaveText("Login");
+});
+```
+
+Hybrid web + mobile tests use both contexts:
+
+```js
+test("same user works on web and mobile", async ({ page, orbit }) => {
+  await page.goto("https://app.example.com");
+  await page.clickText("Create account");
+
+  await orbit.installApp();
+  await orbit.launchApp();
+  await orbit.waitForText("Welcome");
+});
+```
+
+Useful commands:
+
+```bash
+orbittest devices
+orbittest doctor
+orbittest run tests/mobile-smoke.test.js
+```
+
+`@orbittest/mobile` uses ADB and UIAutomator directly. It does not use Appium, WebdriverIO, Detox, Maestro, or Playwright mobile. Mobile test reports include a Mobile Evidence section with device/app details, screenshot preview, UIAutomator summary, and artifact links. On failed mobile tests, OrbitTest asks the provider to save screenshot, UI dump, logcat, error, and result artifacts under `orbittest-results`.
+
+Troubleshooting:
+
+- If a device is `unauthorized`, unlock it and accept the USB debugging prompt.
+- If UIAutomator dump fails, verify the screen is awake and no system permission dialog is blocking the app.
+- If Desktop runs tests, confirm it passes `DEVICE_SERIAL`, `ADB_PATH`, and `PROJECT_ROOT` to the child Node.js process.
+
+---
+
 ## Visual Automation
 
 Use visual automation when an application renders pixels rather than standard HTML elements — canvas games, WebGL scenes, maps, charts, remote desktops, or custom UI frameworks.
@@ -847,6 +939,7 @@ reports/
 - Source code frame for the failing line
 - Trace timeline (when `--trace` is used)
 - Smart browser evidence (when `--smart-report` is used)
+- Mobile evidence for Android tests: device details, app context, screenshots, UI dumps, and logcat links on failure
 
 ### Trace
 
@@ -985,19 +1078,18 @@ jobs:
 
 ---
 
-## Studio
+## UI
 
-Studio is a local web dashboard for day-to-day test work:
+OrbitTest UI is a local web dashboard for day-to-day test work:
 
 ```bash
-orbittest studio
-orbittest ui          # alias
-orbittest studio --port 9323
-orbittest studio --no-open
-orbittest studio --reports-dir reports/staging
+orbittest ui
+orbittest ui --port 9323
+orbittest ui --no-open
+orbittest ui --reports-dir reports/staging
 ```
 
-Studio provides:
+OrbitTest UI provides:
 
 - Run all tests or a single test file
 - Run presets: Local, Evidence (with Smart Report), CI mode

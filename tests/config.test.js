@@ -24,11 +24,44 @@ test("Normalize config boundaries", async () => {
   expect(config.testMatch[0]).toBe("**/*.test.js");
   expect(config.globalSetup[0]).toBe("tests/setup.js");
   expect(config.browser.display).toBe("hide");
-  expect(config.experimental.studio).toBe(true);
+  expect(config.experimental.ui).toBe(true);
   expect(config.experimental.visualAutomation).toBe(true);
   expect(config.experimental.apiTesting).toBe(true);
   expect(config.ci.enabled).toBe(true);
   expect(config.ci.retries).toBe(2);
+  expect(config.use.mobile).toBe(null);
+});
+
+test("Normalize mobile provider config", async () => {
+  const config = normalizeConfig({
+    use: {
+      web: {
+        browser: "chrome",
+        headless: false
+      },
+      mobile: {
+        provider: "@orbittest/mobile",
+        platform: "android",
+        adbPath: "adb",
+        deviceSerial: "device-1",
+        apk: "./app.apk",
+        appPackage: "com.example",
+        appActivity: ".MainActivity",
+        artifactsDir: "orbittest-results",
+        screenshotOnFailure: true,
+        logcatOnFailure: true,
+        uiDumpOnFailure: true,
+        defaultTimeoutMs: 8000
+      }
+    }
+  });
+
+  expect(config.use.web.browser).toBe("chrome");
+  expect(config.use.web.headless).toBe(false);
+  expect(config.use.mobile.provider).toBe("@orbittest/mobile");
+  expect(config.use.mobile.platform).toBe("android");
+  expect(config.use.mobile.deviceSerial).toBe("device-1");
+  expect(config.use.mobile.defaultTimeoutMs).toBe(8000);
 });
 
 test("Resolve CLI display and CI options", async () => {

@@ -16,6 +16,12 @@ const {
 } = require('./failure-diagnostics');
 const { cleanReports, normalizeReportRetention } = require('./report-cleanup');
 const { printCiAnnotations } = require('./ci-annotations');
+const {
+  captureMobileFailureArtifacts,
+  captureMobileReportArtifacts,
+  closeMobileContext,
+  createMobileContext
+} = require('../core/providers/mobile');
 
 const tests = [];
 const beforeAllHooks = [];
@@ -39,6 +45,14 @@ function test(name, options, fn) {
   });
 }
 
+function describe(name, fn) {
+  if (typeof fn !== 'function') {
+    throw new Error(`describe("${name}") must include a function.`);
+  }
+
+  fn();
+}
+
 function beforeEach(fn) {
   registerHook(beforeEachHooks, 'beforeEach', fn);
 }
@@ -56,32 +70,106 @@ function afterAll(fn) {
 }
 
 function expect(actual) {
-  return {
+  return createExpectation(actual, false);
+}
+
+function createExpectation(actual, negated) {
+  const matchers = {
     toBe(expected) {
-      if (actual !== expected) {
-        throw new Error(`Expected ${formatValue(actual)} to be ${formatValue(expected)}`);
-      }
+      assertExpectation(actual === expected, negated, `Expected ${formatValue(actual)} to be ${formatValue(expected)}`);
     },
     toEqual(expected) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`Expected ${formatValue(actual)} to equal ${formatValue(expected)}`);
-      }
+      assertExpectation(
+        JSON.stringify(actual) === JSON.stringify(expected),
+        negated,
+        `Expected ${formatValue(actual)} to equal ${formatValue(expected)}`
+      );
     },
     toContain(expected) {
-      if (!String(actual).includes(String(expected))) {
-        throw new Error(`Expected ${formatValue(actual)} to contain ${formatValue(expected)}`);
-      }
+      assertExpectation(
+        String(actual).includes(String(expected)),
+        negated,
+        `Expected ${formatValue(actual)} to contain ${formatValue(expected)}`
+      );
     },
     toBeTruthy() {
-      if (!actual) {
-        throw new Error(`Expected ${formatValue(actual)} to be truthy`);
+      assertExpectation(Boolean(actual), negated, `Expected ${formatValue(actual)} to be truthy`);
+    },
+    async toHaveText(text, options = {}) {
+      ensureMobileExpectation(actual, 'toHaveText');
+
+      if (!negated && typeof actual.waitForText === 'function') {
+        await actual.waitForText(text, normalizeMatcherTimeout(options));
+        return;
       }
+
+      const pass = await actual.hasText(text, normalizeMatcherOptions(options));
+      assertExpectation(pass, negated, `Expected mobile screen to have text "${text}"`);
+    },
+    async toHaveId(resourceId, options = {}) {
+      ensureMobileExpectation(actual, 'toHaveId');
+
+      if (!negated && typeof actual.waitForId === 'function') {
+        await actual.waitForId(resourceId, normalizeMatcherTimeout(options));
+        return;
+      }
+
+      const nodes = typeof actual.dumpUi === 'function' ? await actual.dumpUi() : [];
+      const pass = nodes.some(node => node.resourceId === resourceId);
+      assertExpectation(pass, negated, `Expected mobile screen to have id "${resourceId}"`);
+    },
+    async toMatchScreenshot(baselinePath, options = {}) {
+      ensureMobileExpectation(actual, 'toMatchScreenshot');
+
+      if (typeof actual.compareScreenshot !== 'function') {
+        throw new Error('Expected mobile orbit context to implement compareScreenshot().');
+      }
+
+      const result = await actual.compareScreenshot(baselinePath, options);
+      assertExpectation(
+        Boolean(result && result.pass),
+        negated,
+        `Expected mobile screenshot to match ${baselinePath}; diff pixels: ${result ? result.diffPixels : 'unknown'}`
+      );
     }
   };
+
+  Object.defineProperty(matchers, 'not', {
+    enumerable: true,
+    get() {
+      return createExpectation(actual, !negated);
+    }
+  });
+
+  return matchers;
+}
+
+function assertExpectation(pass, negated, message) {
+  if (negated ? pass : !pass) {
+    throw new Error(negated ? message.replace('Expected ', 'Expected not ') : message);
+  }
+}
+
+function ensureMobileExpectation(actual, matcherName) {
+  if (!actual || actual.__orbittestMobile !== true) {
+    throw new Error(`${matcherName} is available for @orbittest/mobile orbit contexts.`);
+  }
+}
+
+function normalizeMatcherTimeout(options) {
+  if (typeof options === 'number') {
+    return options;
+  }
+
+  return options.timeoutMs ?? options.timeout;
+}
+
+function normalizeMatcherOptions(options) {
+  return typeof options === 'number' ? { timeoutMs: options } : options;
 }
 
 function emitStudioEvent(type, payload) {
-  if (process.env.ORBITTEST_STUDIO_EVENTS !== '1') return;
+  if (process.env.ORBITTEST_UI_EVENTS !== '1') return;
   try {
     process.stdout.write('__ORBIT_EV__:' + JSON.stringify({ type, ...payload }) + '\n');
   } catch (_) {}
@@ -489,31 +577,49 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       result
     });
 
-    const Orbit = require('../core/orbit');
+    const webEnabled = runOptions.web !== false;
+    const Orbit = webEnabled ? require('../core/orbit') : null;
     const traceOptions = runOptions.trace
       ? createTraceOptions({ artifactsDir, index, test: t, attempt })
       : null;
     if (runOptions.inspector) {
       runOptions.inspector.setTest(t);
     }
-    const orbit = new Orbit({
-      actionTimeout: runOptions.actionTimeout,
-      browserDisplay: runOptions.browserDisplay,
-      trace: traceOptions,
-      smartReport: createSmartReportOptions({ runOptions, artifactsDir, index, test: t, attempt }),
-      studio: createStudioFrameOptions({ runOptions, artifactsDir, index, test: t, attempt }),
-      debug: createDebugOptions(runOptions),
-      verbose: runOptions.verbose
-    });
+    const webOrbit = webEnabled
+      ? new Orbit({
+          actionTimeout: runOptions.actionTimeout,
+          browserDisplay: runOptions.browserDisplay,
+          trace: traceOptions,
+          smartReport: createSmartReportOptions({ runOptions, artifactsDir, index, test: t, attempt }),
+          studio: createStudioFrameOptions({ runOptions, artifactsDir, index, test: t, attempt }),
+          debug: createDebugOptions(runOptions),
+          verbose: runOptions.verbose
+        })
+      : null;
+    let mobileContext = null;
+    let testContext = null;
 
     try {
-      await orbit.launch();
+      if (webOrbit) {
+        await webOrbit.launch();
+      }
+      mobileContext = await createMobileContext({
+        config: runOptions.mobile,
+        testInfo,
+        projectRoot: runOptions.projectRoot || process.cwd(),
+        logger: console
+      });
+      testContext = createTestContext({
+        webOrbit,
+        mobileContext,
+        testInfo
+      });
 
       let testError = null;
 
       try {
         testInfo.phase = 'beforeEach';
-        await runHooks(beforeEachHooks, orbit, testInfo, testTimeout, 'beforeEach');
+        await runHooks(beforeEachHooks, testContext, testInfo, testTimeout, 'beforeEach');
       } catch (error) {
         testError = error;
       }
@@ -521,7 +627,7 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       if (!testError) {
         try {
           testInfo.phase = 'test';
-          await withTimeout(t.fn(orbit, testInfo), testTimeout, `Test timed out after ${testTimeout}ms`);
+          await withTimeout(t.fn(testContext, testInfo), testTimeout, `Test timed out after ${testTimeout}ms`);
         } catch (error) {
           testError = error;
         }
@@ -531,7 +637,7 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
 
       try {
         testInfo.phase = 'afterEach';
-        await runHooks(afterEachHooks, orbit, testInfo, testTimeout, 'afterEach');
+        await runHooks(afterEachHooks, testContext, testInfo, testTimeout, 'afterEach');
       } catch (error) {
         testInfo.afterEachError = serializeError(error);
         testError = testError || error;
@@ -542,7 +648,7 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
         throw testError;
       }
 
-      await attachSmartReportEvidence({ orbit, result });
+      await attachSmartReportEvidence({ orbit: webOrbit, result });
       const smartFailure = createSmartFailure(result.smartReport);
 
       if (smartFailure) {
@@ -568,10 +674,11 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       }
       logVerbose(runOptions, `Passed: ${t.name}`);
       if (shouldAttachTraceArtifact(runOptions, 'passed')) {
-        await attachTraceArtifact({ orbit, result, status: 'passed' });
+        await attachTraceArtifact({ orbit: webOrbit, result, status: 'passed' });
       }
-      await pauseBeforeClose(orbit, result);
-      await closeOrbit(orbit, result);
+      await captureMobileReportArtifacts({ mobileContext, result, testInfo });
+      await pauseBeforeClose(webOrbit, result);
+      await closeTestContexts({ webOrbit, mobileContext, result });
       break;
     } catch (error) {
       updateTestInfoAfterAttempt(testInfo, error, attemptStartedAt);
@@ -580,22 +687,24 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
       result.previousErrors[attempt] = result.error;
 
       if (attempt >= retries) {
-        await attachTraceFailure({ orbit, error });
-        await attachFailureScreenshot({ orbit, result, artifactsDir, index, runOptions });
+        await attachTraceFailure({ orbit: webOrbit, error });
+        await attachFailureScreenshot({ orbit: webOrbit, result, artifactsDir, index, runOptions });
         if (shouldAttachTraceArtifact(runOptions, 'failed')) {
-          await attachTraceArtifact({ orbit, result, status: 'failed' });
+          await attachTraceArtifact({ orbit: webOrbit, result, status: 'failed' });
         }
-        await attachSmartReportEvidence({ orbit, result });
+        await attachSmartReportEvidence({ orbit: webOrbit, result });
+        await captureMobileFailureArtifacts({ mobileContext, result, error, testInfo });
         await attachFailureSnapshot({ result, artifactsDir, index });
         result.diagnostics = buildFailureDiagnostics(result);
         logVerbose(runOptions, `Failed: ${t.name}`);
         logVerbose(runOptions, `Reason: ${result.error.message}`);
       } else {
-        await attachTraceFailure({ orbit, error });
+        await attachTraceFailure({ orbit: webOrbit, error });
         if (shouldAttachTraceArtifact(runOptions, 'failed')) {
-          await attachTraceArtifact({ orbit, result, status: 'failed' });
+          await attachTraceArtifact({ orbit: webOrbit, result, status: 'failed' });
         }
-        await attachSmartReportEvidence({ orbit, result });
+        await attachSmartReportEvidence({ orbit: webOrbit, result });
+        await captureMobileFailureArtifacts({ mobileContext, result, error, testInfo });
         result.diagnostics = buildFailureDiagnostics(result);
         logVerbose(runOptions, `Retrying: ${t.name} (${attempt + 1}/${retries})`);
         logVerbose(runOptions, `Reason: ${result.error.message}`);
@@ -608,8 +717,8 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
         });
       }
 
-      await pauseBeforeClose(orbit, result);
-      await closeOrbit(orbit, result);
+      await pauseBeforeClose(webOrbit, result);
+      await closeTestContexts({ webOrbit, mobileContext, result });
     }
   }
 
@@ -628,7 +737,8 @@ async function runOneTest(t, index, artifactsDir, runOptions) {
     } : null,
     artifacts: {
       screenshot: (result.artifacts && result.artifacts.screenshot) ? result.artifacts.screenshot : null,
-      trace: (result.artifacts && result.artifacts.trace) ? result.artifacts.trace : null
+      trace: (result.artifacts && result.artifacts.trace) ? result.artifacts.trace : null,
+      mobile: (result.artifacts && result.artifacts.mobile) ? result.artifacts.mobile : null
     }
   });
 
@@ -664,6 +774,96 @@ function updateTestInfoAfterAttempt(testInfo, error, startedAt) {
   testInfo.error = error ? serializeError(error) : null;
 }
 
+function createTestContext({ webOrbit, mobileContext, testInfo }) {
+  const context = webOrbit || createDisabledWebContext();
+  const page = webOrbit ? createWebPageContext(webOrbit) : createDisabledWebContext();
+
+  Object.defineProperties(context, {
+    page: {
+      configurable: true,
+      enumerable: true,
+      value: page
+    },
+    web: {
+      configurable: true,
+      enumerable: true,
+      value: page
+    },
+    orbit: {
+      configurable: true,
+      enumerable: true,
+      value: mobileContext ? mobileContext.orbit : null
+    },
+    mobile: {
+      configurable: true,
+      enumerable: true,
+      value: mobileContext ? mobileContext.orbit : null
+    },
+    testInfo: {
+      configurable: true,
+      enumerable: true,
+      value: testInfo
+    }
+  });
+
+  return context;
+}
+
+function createWebPageContext(webOrbit) {
+  const aliases = {
+    goto: (...args) => webOrbit.open(...args),
+    clickText: (text, options) => webOrbit.click(text, options),
+    typeText: (locator, value, options) => webOrbit.type(locator, value, options)
+  };
+
+  return new Proxy(aliases, {
+    get(target, prop) {
+      if (prop in target) {
+        return target[prop];
+      }
+
+      const value = webOrbit[prop];
+
+      if (typeof value === 'function') {
+        return value.bind(webOrbit);
+      }
+
+      return value;
+    },
+    set(target, prop, value) {
+      webOrbit[prop] = value;
+      return true;
+    }
+  });
+}
+
+function createDisabledWebContext() {
+  const target = {};
+  const createDisabledWebMethod = (prop) => () => {
+    throw new Error(
+      `Web testing is disabled for this run. Set use.web to an object in orbittest.config.js before calling "${String(prop)}".`
+    );
+  };
+
+  return new Proxy(target, {
+    get(current, prop) {
+      if (prop in current) {
+        return current[prop];
+      }
+
+      if (prop === 'then') {
+        return undefined;
+      }
+
+      return createDisabledWebMethod(prop);
+    },
+    set(current, prop, value) {
+      current[prop] = value;
+      return true;
+    }
+  });
+}
+
 async function runHooks(hooks, orbit, testInfo, timeoutMs, hookName = 'hook') {
   for (const hook of hooks) {
     await withTimeout(hook(orbit, testInfo), timeoutMs, `${hookName} hook timed out after ${timeoutMs}ms`);
@@ -677,6 +877,10 @@ async function runAllHooks(hooks, runInfo, timeoutMs, hookName) {
 }
 
 async function closeOrbit(orbit, result) {
+  if (!orbit || typeof orbit.close !== 'function') {
+    return;
+  }
+
   try {
     await orbit.close();
   } catch (error) {
@@ -693,6 +897,11 @@ async function closeOrbit(orbit, result) {
       result.error.message += `; Browser cleanup failed: ${closeError.message}`;
     }
   }
+}
+
+async function closeTestContexts({ webOrbit, mobileContext, result }) {
+  await closeMobileContext(mobileContext, result);
+  await closeOrbit(webOrbit, result);
 }
 
 async function pauseBeforeClose(orbit, result) {
@@ -720,6 +929,7 @@ function normalizeRunOptions(options, workers) {
   const browserDisplay = step
     ? 'show'
     : normalizeBrowserDisplay(options.browserDisplay, ci.enabled ? 'hide' : 'show');
+  const web = process.env.ORBITTEST_MOBILE === '1' ? false : options.web;
 
   return {
     workers: step ? 1 : workers,
@@ -730,7 +940,7 @@ function normalizeRunOptions(options, workers) {
     traceMode,
     screenshot,
     browserDisplay,
-    studioFrames: Boolean(options.studioFrames || process.env.ORBITTEST_STUDIO_FRAMES === '1'),
+    studioFrames: Boolean(options.studioFrames || process.env.ORBITTEST_UI_FRAMES === '1'),
     smartReport: Boolean(options.smartReport),
     smartReportSlowRequestMs: normalizeInteger(options.smartReportSlowRequestMs, 2000),
     verbose: Boolean(options.verbose),
@@ -739,6 +949,9 @@ function normalizeRunOptions(options, workers) {
     maxFailures: normalizeInteger(options.maxFailures ?? ci.maxFailures, 0),
     shard: normalizeShard(options.shard ?? ci.shard),
     ci,
+    web: web === false ? false : (web || null),
+    mobile: options.mobile || null,
+    projectRoot: options.projectRoot || process.cwd(),
     openReportOnFailure: normalizeOpenReportOnFailure(options.openReportOnFailure),
     reportRetention: normalizeReportRetention(options.reportRetention)
   };
@@ -1160,7 +1373,7 @@ function createStudioFrameOptions({ runOptions, artifactsDir, index, test, attem
     captureFrames: true,
     dir: path.join(
       artifactsDir,
-      'studio-frames',
+      'ui-frames',
       `${String(index + 1).padStart(2, '0')}-${testSlug}${attemptSuffix}`
     ),
     testIndex: index + 1,
@@ -1727,6 +1940,7 @@ function withTimeout(promise, timeoutMs, message) {
 
 module.exports = {
   test,
+  describe,
   beforeAll,
   afterAll,
   beforeEach,

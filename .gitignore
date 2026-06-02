@@ -1,6 +1,7 @@
 node_modules/
 dist/
 /reports/
+/orbittest-results/
 chrome-profile/
 tmp-profile-*/
 npm-debug.log*

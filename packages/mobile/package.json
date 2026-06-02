@@ -1,0 +1,39 @@
+{
+  "name": "@orbittest/mobile",
+  "version": "0.1.0",
+  "description": "Android mobile automation provider for OrbitTest built on ADB and UIAutomator.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "src",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build.js packages/mobile"
+  },
+  "keywords": [
+    "orbittest",
+    "android",
+    "adb",
+    "uiautomator",
+    "mobile-testing"
+  ],
+  "author": "Abhay",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "debug": "^4.4.3",
+    "execa": "^9.6.0",
+    "fast-xml-parser": "^5.3.2",
+    "get-port": "^7.1.0",
+    "p-limit": "^7.2.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0"
+  }
+}

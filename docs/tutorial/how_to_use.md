@@ -4,7 +4,7 @@ This tutorial shows how to install OrbitTest, create a test, use browser actions
 
 ## Feature Status
 
-- Stable: UI automation, lifecycle hooks, locator engine, reports, CI/CD, Smart Report, Studio/UI, browser display controls, browser storage/session state
+- Stable: UI automation, lifecycle hooks, locator engine, reports, CI/CD, Smart Report, OrbitTest UI, browser display controls, browser storage/session state
 - Experimental: visual automation
 - Future: API automation
 
@@ -119,7 +119,7 @@ module.exports = {
     display: "auto"
   },
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   },
@@ -169,12 +169,12 @@ Use `--verbose` only when you want OrbitTest internal browser/action logs:
 orbittest run tests/login.test.js --verbose
 ```
 
-## OrbitTest Studio
+## OrbitTest UI
 
-Start the local Studio UI:
+Start the local UI dashboard:
 
 ```bash
-orbittest studio
+orbittest ui
 ```
 
 This opens a dashboard at a local URL like:
@@ -183,7 +183,7 @@ This opens a dashboard at a local URL like:
 http://127.0.0.1:9323/
 ```
 
-Studio is useful when you want to run and inspect tests without manually opening report folders:
+OrbitTest UI is useful when you want to run and inspect tests without manually opening report folders:
 
 - See test files and registered test names.
 - Run all tests or one file.
@@ -199,25 +199,19 @@ Studio is useful when you want to run and inspect tests without manually opening
 Use a custom port:
 
 ```bash
-orbittest studio --port 9400
+orbittest ui --port 9400
 ```
 
-Start Studio without opening the browser automatically:
+Start UI without opening the browser automatically:
 
 ```bash
-orbittest studio --no-open
+orbittest ui --no-open
 ```
 
-Point Studio at a different reports folder:
+Point UI at a different reports folder:
 
 ```bash
-orbittest studio --reports-dir reports/staging
-```
-
-`orbittest ui` is an alias for the same command:
-
-```bash
-orbittest ui
+orbittest ui --reports-dir reports/staging
 ```
 
 Control whether Chrome is visible:
@@ -1219,7 +1213,7 @@ module.exports = {
     display: "auto"
   },
   experimental: {
-    studio: true,
+    ui: true,
     visualAutomation: true,
     apiTesting: false
   }

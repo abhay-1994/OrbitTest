@@ -192,6 +192,68 @@ export type NotificationPermission =
   | 'unsupported'
   | 'unknown';
 
+export interface OrbitMobileConfig {
+  provider?: string;
+  platform?: 'android';
+  adbPath?: string;
+  deviceSerial?: string | null;
+  apk?: string | null;
+  appPackage?: string | null;
+  appActivity?: string | null;
+  artifactsDir?: string;
+  screenshotOnFailure?: boolean;
+  logcatOnFailure?: boolean;
+  uiDumpOnFailure?: boolean;
+  defaultTimeoutMs?: number;
+}
+
+export interface OrbitMobileContext {
+  readonly __orbittestMobile: true;
+  installApp(apkPath?: string): Promise<void>;
+  uninstallApp(packageName?: string): Promise<void>;
+  launchApp(packageName?: string, activity?: string): Promise<void>;
+  stopApp(packageName?: string): Promise<void>;
+  clearAppData(packageName?: string): Promise<void>;
+  isAppInstalled(packageName?: string): Promise<boolean>;
+  tap(x: number, y: number): Promise<void>;
+  longPress(x: number, y: number, durationMs?: number): Promise<void>;
+  swipe(x1: number, y1: number, x2: number, y2: number, durationMs?: number): Promise<void>;
+  scrollDown(amount?: number): Promise<void>;
+  scrollUp(amount?: number): Promise<void>;
+  typeText(text: string): Promise<void>;
+  clearText(): Promise<void>;
+  sleep(ms: number): Promise<void>;
+  pressKey(code: number): Promise<void>;
+  tapText(text: string, options?: { exact?: boolean; timeoutMs?: number }): Promise<void>;
+  tapById(resourceId: string, options?: { timeoutMs?: number }): Promise<void>;
+  tapByDescription(description: string, options?: { exact?: boolean; timeoutMs?: number }): Promise<void>;
+  getScreenSize(): Promise<{ width: number; height: number }>;
+  dumpUi(): Promise<unknown[]>;
+  getScreenText(): Promise<string>;
+  hasText(text: string, options?: { exact?: boolean }): Promise<boolean>;
+  waitForText(text: string, timeoutMs?: number): Promise<void>;
+  waitForId(resourceId: string, timeoutMs?: number): Promise<void>;
+  waitForGoneText(text: string, timeoutMs?: number): Promise<void>;
+  getCurrentActivity(): Promise<string>;
+  getCurrentPackage(): Promise<string>;
+  screenshot(): Promise<Buffer>;
+  saveScreenshot(path: string): Promise<void>;
+  compareScreenshot(
+    baselinePath: string,
+    options?: { threshold?: number; diffPath?: string }
+  ): Promise<{ pass: boolean; diffPixels: number; diffPath?: string }>;
+  clearLogcat(): Promise<void>;
+  getLogcat(filter?: string): Promise<string[]>;
+  saveLogcat(path: string, filter?: string): Promise<void>;
+  wakeUp(): Promise<void>;
+  sleepScreen(): Promise<void>;
+  isScreenOn(): Promise<boolean>;
+  getAndroidVersion(): Promise<string>;
+  getModel(): Promise<string>;
+  adb(args: string[]): Promise<string>;
+  shell(command: string | string[]): Promise<string>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Window selector
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,6 +370,8 @@ export interface RunInfo {
 
 /** Assertion handle returned by `expect()`. */
 export interface Expect<T = unknown> {
+  /** Negate the next matcher. */
+  not: Expect<T>;
   /** Strict equality (`===`). */
   toBe(expected: T): void;
   /** Deep equality (JSON comparison). */
@@ -316,6 +380,15 @@ export interface Expect<T = unknown> {
   toContain(expected: string): void;
   /** Passes when value is truthy. */
   toBeTruthy(): void;
+  /** Mobile matcher: waits for text on the current Android screen. */
+  toHaveText(text: string, options?: number | { exact?: boolean; timeoutMs?: number }): Promise<void>;
+  /** Mobile matcher: waits for a UIAutomator resource-id. */
+  toHaveId(resourceId: string, options?: number | { timeoutMs?: number }): Promise<void>;
+  /** Mobile matcher: compares the current device screenshot with a baseline image. */
+  toMatchScreenshot(
+    baselinePath: string,
+    options?: { threshold?: number; diffPath?: string }
+  ): Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,6 +418,13 @@ export interface OrbitConfig {
   browser?: {
     /** Browser window visibility (default: `"auto"` — hidden in CI, visible locally). */
     display?: 'auto' | 'show' | 'hide';
+  };
+  use?: {
+    web?: false | {
+      browser?: 'chrome' | string;
+      headless?: boolean;
+    };
+    mobile?: OrbitMobileConfig | false | null;
   };
   /** Enable smart failure diagnostics (console errors, slow requests, JS exceptions). */
   smartReport?: boolean;
@@ -379,6 +459,8 @@ export interface OrbitConfig {
     githubAnnotations?: boolean;
   };
   experimental?: {
+    ui?: boolean;
+    /** @deprecated Use `ui` instead. */
     studio?: boolean;
     visualAutomation?: boolean;
     apiTesting?: boolean;
@@ -784,6 +866,24 @@ export declare class Orbit implements OrbitContext {
   getHTML(options?: ActionOptions): Promise<string>;
 }
 
+export interface WebPageContext extends Orbit {
+  goto(url: string, options?: ActionOptions): Promise<void>;
+  clickText(text: string, options?: ClickOptions): Promise<void>;
+  typeText(locator: Locator, value: string, options?: TypeOptions): Promise<void>;
+}
+
+export interface TestContext extends Orbit {
+  /** Web page context. Alias-friendly wrapper around the existing Orbit web API. */
+  page: WebPageContext;
+  /** Alias for `page`. */
+  web: WebPageContext;
+  /** Mobile device context when `use.mobile` is configured. */
+  orbit: OrbitMobileContext | null;
+  /** Alias for `orbit`. */
+  mobile: OrbitMobileContext | null;
+  testInfo: TestInfo;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test lifecycle functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -800,13 +900,16 @@ export declare class Orbit implements OrbitContext {
  */
 export declare function test(
   name: string,
-  fn: (orbit: Orbit) => Promise<void>
+  fn: (orbit: TestContext) => Promise<void>
 ): void;
 export declare function test(
   name: string,
   options: TestOptions,
-  fn: (orbit: Orbit) => Promise<void>
+  fn: (orbit: TestContext) => Promise<void>
 ): void;
+
+/** Group tests while preserving OrbitTest's lightweight registration model. */
+export declare function describe(name: string, fn: () => void): void;
 
 /**
  * Create an assertion.
@@ -838,7 +941,7 @@ export declare function afterAll(
  * Receives the `Orbit` instance and `TestInfo` for that test.
  */
 export declare function beforeEach(
-  fn: (orbit: Orbit, testInfo: TestInfo) => Promise<void>
+  fn: (orbit: TestContext, testInfo: TestInfo) => Promise<void>
 ): void;
 
 /**
@@ -846,7 +949,7 @@ export declare function beforeEach(
  * passed or failed. Receives the `Orbit` instance and `TestInfo`.
  */
 export declare function afterEach(
-  fn: (orbit: Orbit, testInfo: TestInfo) => Promise<void>
+  fn: (orbit: TestContext, testInfo: TestInfo) => Promise<void>
 ): void;
 
 /**

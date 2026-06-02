@@ -2,7 +2,7 @@ const vm = require("vm");
 const { test, expect } = require("orbittest");
 const { startStudioServer } = require("../runner/studio-server");
 
-test("Studio serves parseable HTML and project state", async () => {
+test("UI serves parseable HTML and project state", async () => {
   let studio = null;
 
   try {
@@ -18,6 +18,9 @@ test("Studio serves parseable HTML and project state", async () => {
 
     expect(htmlResponse.status).toBe(200);
     expect(Boolean(scriptMatch)).toBe(true);
+    expect(html.includes("<title>OrbitTest UI</title>")).toBe(true);
+    expect(html.includes("<h1>OrbitTest UI</h1>")).toBe(true);
+    expect(html.includes(["OrbitTest", "Stu" + "dio"].join(" "))).toBe(false);
     expect(html.includes('id="playerPlayButton"')).toBe(true);
     expect(html.includes('id="frameScrubber"')).toBe(true);
     expect(html.includes('id="liveFrameUrl"')).toBe(true);

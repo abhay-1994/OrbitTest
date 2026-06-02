@@ -1,6 +1,6 @@
 {
   "name": "orbittest",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Browser automation test runner built on Chrome DevTools Protocol.",
   "main": "orbit.js",
   "types": "index.d.ts",
@@ -8,6 +8,11 @@
     ".": {
       "types": "./index.d.ts",
       "default": "./orbit.js"
+    },
+    "./mobile": {
+      "types": "./mobile.d.ts",
+      "require": "./mobile.js",
+      "default": "./mobile.js"
     }
   },
   "bin": {
@@ -16,8 +21,11 @@
   "files": [
     "cli.js",
     "orbit.js",
+    "mobile.js",
+    "mobile.d.ts",
     "index.d.ts",
     "core",
+    "packages/mobile",
     "pages",
     "runner",
     "assets",
@@ -29,6 +37,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
+    "build": "node scripts/build.js",
     "test": "node cli.js run",
     "unit": "node --test tests/unit/**/*.unit.js",
     "prepublishOnly": "npm test"
@@ -44,14 +53,32 @@
   "author": "Abhay",
   "license": "Apache-2.0",
   "type": "commonjs",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "commander": "^14.0.2",
+    "debug": "^4.4.3",
+    "dotenv": "^17.2.3",
+    "execa": "^9.6.0",
+    "fast-glob": "^3.3.3",
+    "fast-xml-parser": "^5.3.2",
+    "get-port": "^7.1.0",
+    "p-limit": "^7.2.0",
+    "picocolors": "^1.1.1",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "puppeteer": "^24.42.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@types/node": "^25.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
 }
